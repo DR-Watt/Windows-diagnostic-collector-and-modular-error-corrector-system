@@ -1,27 +1,40 @@
-# CLEAN Generation Log — v1.2.11 native command argument binding
+# CLEAN Generation Log / Changelog — v1.3.0 P0 Evidence Quality Pack
 
-- Timestamp: 2026-06-08
-- Type: Hotfix
-- Scope: Native command runner
+## Build metadata
 
-## Problem
+- Timestamp: `2026-06-08T15:40:58.806348+00:00`
+- Version: `1.3.0`
+- Scope: `SystemEvidenceCollector` P0 evidence quality
+- Source roadmap: `docs/20260608-160353-HAL-SystemEvidence-deep-analysis-roadmap.md`
 
-The generated `native-command-catalog.json` and `native-command-results.json` showed empty `Args`, empty `ArgumentString`, and executable-only `CommandLine` values. Runtime stdout confirmed that tools were launched without arguments, producing help text instead of diagnostic data.
-
-## Root cause
-
-The command definition helper used a parameter named `Args`. This is unsafe/confusing in PowerShell because `$args` is also an automatic variable. The hotfix replaces it with `CommandArguments` and stores the result as `ArgumentList`.
-
-## Modified files
+## Módosított / új fájlok
 
 - `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
 - `modules/SystemEvidenceCollector/manifest.json`
-- `docs/native_commands_reference.md`
-- `README_v1.2.11.md`
-- `clean_generation_log.md`
+- `docs/system_evidence_schema_v1_3_0.md`
+- `docs/collector_acceptance_tests.md`
+- `docs/20260608-160353-HAL-SystemEvidence-deep-analysis-roadmap.md`
+- `validators/Validate-SystemEvidencePackage.ps1`
+- `README_v1.3.0.md`
 
-## Validation
+## Fő implementált P0 elemek
 
-- JSON manifest syntax checked.
-- ZIP integrity checked.
-- Windows runtime test must be done on the client machine.
+1. EVTX export.
+2. WindowsUpdate.generated.log.
+3. DISM ScanHealth.
+4. SFC verifyonly.
+5. Storage mapping és Disk 153 map.
+6. Warning/error státuszmodell.
+7. Vendor whitelist/blacklist.
+8. Manifest SHA-256.
+9. Event truncation metadata.
+
+## Validáció
+
+- JSON manifest validálva Python parserrel.
+- ZIP integritás ellenőrizve.
+- PowerShell runtime teszt nem futott ebben a Linux konténerben.
+
+## diagnostics_starter_pack
+
+A build a Windows 11 PowerShell diagnosztikai sablonra épít; futtatás előtt továbbra is javasolt az `Initialize-DiagEnvironment.ps1` indítása.

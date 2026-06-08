@@ -1,68 +1,32 @@
 <#
 .SYNOPSIS
-  DiagFramework SystemEvidence LOG csomag szerkezeti validátora.
+  SystemEvidence v1.3 package validator.
 #>
 [CmdletBinding()]
-param(
-    [Parameter(Mandatory)][string]$PackagePath
-)
-
-Set-StrictMode -Version Latest
+param([Parameter(Mandatory)][string]$PackagePath)
 $ErrorActionPreference = 'Stop'
-
-if (-not (Test-Path $PackagePath)) {
-    throw "Nem található a megadott SystemEvidence csomag/mappa: $PackagePath"
-}
-
-$temp = $null
+function Test-Exists([string]$Path) { Test-Path -LiteralPath $Path }
 $root = $PackagePath
+$temp = $null
+if ((Test-Path -LiteralPath $PackagePath -PathType Leaf) -and $PackagePath.ToLowerInvariant().EndsWith('.zip')) {
+    $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('DiagFrameworkEvidenceValidate-' + [guid]::NewGuid().ToString('N'))
+    New-Item -Path $temp -ItemType Directory -Force | Out-Null
+    Expand-Archive -LiteralPath $PackagePath -DestinationPath $temp -Force
+    $root = $temp
+}
+$checks = @(
+    'AI_README.md','ai_summary.json','collector-progress.jsonl','manifest.json',
+    'errors/collector-issues.json','events/event-export-metadata.json',
+    'windows_update/Get-WindowsUpdateLog.result.json','vendor_logs/vendor-log-policy.json'
+)
+$results = @()
+foreach ($rel in $checks) { $results += [PSCustomObject]@{ Path=$rel; Exists=(Test-Exists (Join-Path $root $rel)) } }
+$manifestHashOk = $false
 try {
-    if ((Get-Item $PackagePath).Extension -eq '.zip') {
-        $temp = Join-Path ([System.IO.Path]::GetTempPath()) ('diag-evidence-validate-' + [guid]::NewGuid().ToString('N'))
-        New-Item -Path $temp -ItemType Directory -Force | Out-Null
-        Expand-Archive -Path $PackagePath -DestinationPath $temp -Force
-        $root = $temp
-    }
-
-    $required = @(
-        'manifest.json',
-        'ai_summary.json',
-        'AI_README.md',
-        'collector-progress.jsonl',
-        'meta\system-info.json',
-        'registry\reboot-pending.json',
-        'drivers\pnp-signed-drivers.json',
-        'events\event-summary.json',
-        'errors\collector-errors.json',
-        'commands\native-command-results.json'
-    )
-
-    $results = foreach ($rel in $required) {
-        $path = Join-Path $root $rel
-        $exists = Test-Path $path
-        $jsonValid = $null
-        $errorText = $null
-        if ($exists -and $rel -match '\.json$') {
-            try {
-                Get-Content -Path $path -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop | Out-Null
-                $jsonValid = $true
-            }
-            catch {
-                $jsonValid = $false
-                $errorText = $_.Exception.Message
-            }
-        }
-        [PSCustomObject]@{ RelativePath=$rel; Exists=$exists; JsonValid=$jsonValid; Error=$errorText }
-    }
-
-    $failed = @($results | Where-Object { -not $_.Exists -or $_.JsonValid -eq $false })
-    [PSCustomObject]@{
-        PackagePath = $PackagePath
-        Checked = $required.Count
-        Failed = $failed.Count
-        Results = @($results)
-    } | ConvertTo-Json -Depth 8
-}
-finally {
-    if ($temp -and (Test-Path $temp)) { Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue }
-}
+    $manifest = Get-Content -LiteralPath (Join-Path $root 'manifest.json') -Raw | ConvertFrom-Json
+    $withHash = @($manifest.Files | Where-Object { $_.PSObject.Properties['SHA256'] -and $_.SHA256 })
+    $manifestHashOk = ($withHash.Count -gt 0)
+} catch { }
+$out = [PSCustomObject]@{ PackagePath=$PackagePath; Root=$root; RequiredFiles=$results; ManifestHasSha256=$manifestHashOk; Valid=(@($results | Where-Object { -not $_.Exists }).Count -eq 0 -and $manifestHashOk) }
+if ($temp) { Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue }
+$out | ConvertTo-Json -Depth 8
