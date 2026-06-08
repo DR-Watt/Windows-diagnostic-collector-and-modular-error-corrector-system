@@ -1,3 +1,27 @@
+# DiagFramework Windows Update Repair MVP v1.2.4 — Bootstrap Output Hotfix
+
+## Cél
+
+Ez a build a v1.2.3 bootstrap hibáját javítja: a környezeti diagnosztika `Write-EnvLog` függvénye korábban `Tee-Object` használata miatt success streamre is írt, ezért a validátor-wrapper több objektumot adott vissza, nem csak a JSON summary objektumot. Ennek következménye volt: `The property 'Failed' cannot be found on this object`.
+
+## Javítás
+
+- `diagnostics/Initialize-DiagEnvironment.ps1`:
+  - `Write-EnvLog` most `Add-Content` + `Write-Host` mintát használ.
+  - `Invoke-JsonValidatorScript` JSON-kimenet feldolgozása robusztusabb.
+  - Kötelező validátor mezők ellenőrzése: `Failed`, `Valid`, `Checked`, `Results`.
+- A validátorok outputja már nem szennyeződik bootstrap log sorokkal.
+
+## Futtatás
+
+```powershell
+Set-Location C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
+.\diagnostics\Initialize-DiagEnvironment.ps1
+.\install_and_run.bat
+```
+
+---
+
 # DiagFramework Windows Update Repair MVP v1.2.2 — Structured AI UI & System Evidence Hotfix
 
 ## v1.2.2 hotfix összefoglaló

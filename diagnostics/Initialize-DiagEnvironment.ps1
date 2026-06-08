@@ -2,9 +2,8 @@
 .SYNOPSIS
   Környezeti diagnosztika és opcionális javítás Windows 11 / PowerShell 7.x futtatáshoz.
 .DESCRIPTION
-  v1.2.3: a validátorok JSON kimenetét stream-összemosás nélkül értékeli ki.
-  A PowerShell szintaxisvalidátor hibája így nem keveredik a JSON kimenetbe, és
-  az Argument types do not match jellegű validátorhibák pontosabb üzenettel jelennek meg.
+  v1.2.4: a bootstrap logger nem szennyezi a validátorok success streamjét.
+  A validátor JSON kimenete sémavizsgálatot kap, a naplózás pedig Add-Content + Write-Host mintára váltott.
 #>
 [CmdletBinding()]
 param(
@@ -22,13 +21,62 @@ $logFile = Join-Path $logDir ('environment-{0}.log' -f (Get-Date -Format 'yyyyMM
 function Write-EnvLog {
     param([string]$Message)
     $line = '[{0}] {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
-    $line | Tee-Object -FilePath $logFile -Append
-}
 
+    # Ne használjunk Tee-Objectet itt: a Tee-Object a success output streamre is továbbít,
+    # ezért ha a Write-EnvLog egy validátor-wrapperen belül fut, a log sor bekerülhet
+    # a JSON validátor visszatérési értékébe. Ez okozta a v1.2.3 hibát:
+    # "The property 'Failed' cannot be found on this object".
+    Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
+    Write-Host $line
+}
 function Test-IsAdmin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+}
+
+function ConvertFrom-ValidatorJsonText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Text
+    )
+
+    $trimmed = $Text.Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) {
+        throw "$Name nem adott JSON kimenetet."
+    }
+
+    try {
+        return ($trimmed | ConvertFrom-Json -ErrorAction Stop)
+    }
+    catch {
+        # Védelmi fallback: ha a validátor véletlenül figyelmeztetést vagy egyéb szöveget is írt
+        # a success streamre, megpróbáljuk a külső JSON objektumot kivágni.
+        $first = $trimmed.IndexOf('{')
+        $last = $trimmed.LastIndexOf('}')
+        if ($first -ge 0 -and $last -gt $first) {
+            $candidate = $trimmed.Substring($first, ($last - $first + 1))
+            try { return ($candidate | ConvertFrom-Json -ErrorAction Stop) } catch { }
+        }
+        throw "$Name kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)"
+    }
+}
+
+function Assert-ValidatorProperty {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Summary,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string[]]$RequiredProperties
+    )
+
+    foreach ($prop in $RequiredProperties) {
+        if (-not $Summary.PSObject.Properties[$prop]) {
+            $available = @($Summary.PSObject.Properties.Name) -join ', '
+            throw "$Name hibás JSON sémát adott vissza. Hiányzó mező: $prop. Elérhető mezők: $available"
+        }
+    }
 }
 
 function Invoke-JsonValidatorScript {
@@ -46,7 +94,7 @@ function Invoke-JsonValidatorScript {
     Write-EnvLog "$Name futtatása."
 
     try {
-        $output = & $Path @Arguments
+        $output = @(& $Path @Arguments)
         $succeeded = $?
     }
     catch {
@@ -55,24 +103,15 @@ function Invoke-JsonValidatorScript {
 
     $text = ($output | Out-String).Trim()
     if (-not [string]::IsNullOrWhiteSpace($text)) {
-        $text | Tee-Object -FilePath $logFile -Append
+        Add-Content -LiteralPath $logFile -Value $text -Encoding UTF8
     }
 
     if (-not $succeeded) {
-        throw "$Name sikertelenül futott."
-    }
-    if ([string]::IsNullOrWhiteSpace($text)) {
-        throw "$Name nem adott JSON kimenetet."
+        throw "$Name sikertelenül futott. Kimenet: $text"
     }
 
-    try {
-        return ($text | ConvertFrom-Json -ErrorAction Stop)
-    }
-    catch {
-        throw "$Name kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)"
-    }
+    return (ConvertFrom-ValidatorJsonText -Name $Name -Text $text)
 }
-
 Write-EnvLog "RootPath: $RootPath"
 Write-EnvLog "PowerShell: $($PSVersionTable.PSVersion) / Edition: $($PSVersionTable.PSEdition) / Platform: $($PSVersionTable.Platform)"
 
@@ -93,6 +132,8 @@ $manifestSummary = Invoke-JsonValidatorScript `
     -Path (Join-Path $RootPath 'validators\Validate-Manifests.ps1') `
     -Arguments @{ RootPath = $RootPath }
 
+Assert-ValidatorProperty -Summary $manifestSummary -Name 'Manifest validátor' -RequiredProperties @('Failed','Checked','Results')
+
 if ([int]$manifestSummary.Failed -gt 0) {
     throw "Manifest validációs hiba. Hibás manifestek száma: $($manifestSummary.Failed)"
 }
@@ -102,6 +143,8 @@ $uiSummary = Invoke-JsonValidatorScript `
     -Path (Join-Path $RootPath 'validators\Validate-UiResources.ps1') `
     -Arguments @{ RootPath = $RootPath; Culture = 'hu-HU' }
 
+Assert-ValidatorProperty -Summary $uiSummary -Name 'UI resource validátor' -RequiredProperties @('Valid','ErrorCount','Errors')
+
 if (-not [bool]$uiSummary.Valid) {
     throw "UI resource validációs hiba. Hibák száma: $($uiSummary.ErrorCount)"
 }
@@ -110,6 +153,8 @@ $syntaxSummary = Invoke-JsonValidatorScript `
     -Name 'PowerShell szintaxisvalidátor' `
     -Path (Join-Path $RootPath 'validators\Validate-PowerShellSyntax.ps1') `
     -Arguments @{ RootPath = $RootPath }
+
+Assert-ValidatorProperty -Summary $syntaxSummary -Name 'PowerShell szintaxisvalidátor' -RequiredProperties @('Valid','Failed','Checked','Results')
 
 if (-not [bool]$syntaxSummary.Valid) {
     throw "PowerShell szintaxisvalidációs hiba. Hibás fájlok száma: $($syntaxSummary.Failed)"
