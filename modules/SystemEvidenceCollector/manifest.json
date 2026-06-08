@@ -1,16 +1,16 @@
 {
   "Id": "SystemEvidenceCollector",
   "Name": "Rendszer LOG bizonyítékgyűjtő",
-  "Version": "1.2.9",
+  "Version": "1.2.10",
   "Author": "DiagTeam",
   "Script": "SystemEvidenceCollector.ps1",
   "Risk": "Low",
   "Category": "EvidenceCollection",
-  "Description": "Rendszerszintű Windows 11 evidence csomag.",
+  "Description": "Általános Windows 11 rendszer LOG bizonyítékcsomag. v1.2.10: natív parancsok pontosított Microsoft Learn alapú leírása, args/commandline javítás, stdout/stderr méret és preview metaadatok.",
   "Ui": {
-    "Summary": "Rendszerszintű Windows 11 evidence csomag.\n\nMit gyűjt:\n1) OS, build, BIOS, gépmodell és PowerShell környezet.\n2) Pending reboot registry állapotok.\n3) PnP signed driver snapshot.\n4) Windows Update, Setup, Kernel-Boot, Kernel-PnP, DeviceSetupManager, WER és WHEA események.\n5) CBS, DISM, Panther, SetupAPI, WER, minidump és vendor logok.\n\nA modul olvasási jellegű, nem javít rendszert.",
-    "RecommendedAction": "Javasolt lépések:\n1) Kapcsold be a „Rendszerszintű LOG csomag” jelölőt.\n2) Hagyd inaktívan a KB mezőt.\n3) Állítsd be a napok számát, például 30.\n4) Indítsd el a rendszer LOG csomagot.\n5) Először az AI_README.md fájlt olvasd el.\n6) Ezután nézd meg az ai_summary.json állapotát.\n7) A collector-progress.jsonl mutatja a futási sorrendet.\n8) Partial státusz esetén az errors/collector-errors.json a fő hibaforrás.\n9) Drivergyanúnál a drivers és events mappa fontos.\n10) Servicing/update rollback gyanúnál CBS, DISM, Panther és ReportingEvents az elsődleges.",
-    "DetailedSteps": "Javasolt lépések:\n1) Kapcsold be a „Rendszerszintű LOG csomag” jelölőt.\n2) Hagyd inaktívan a KB mezőt.\n3) Állítsd be a napok számát, például 30.\n4) Indítsd el a rendszer LOG csomagot.\n5) Először az AI_README.md fájlt olvasd el.\n6) Ezután nézd meg az ai_summary.json állapotát.\n7) A collector-progress.jsonl mutatja a futási sorrendet.\n8) Partial státusz esetén az errors/collector-errors.json a fő hibaforrás.\n9) Drivergyanúnál a drivers és events mappa fontos.\n10) Servicing/update rollback gyanúnál CBS, DISM, Panther és ReportingEvents az elsődleges.",
+    "Summary": "Általános Windows 11 rendszerbizonyíték-csomag boot, setup, driver, Windows Update, recovery, BCD, servicing és vendor diagnosztikai elemzéshez.\n\nA v1.2.10 külön parancskatalógust készít a commands mappába: COMMANDS_README.md, native-command-catalog.json és részletes native-command-results.json.\n\nA natív parancsoknál nem csak az stdout/stderr fájlútvonal kerül mentésre, hanem a CommandLine, Args, cél, várt jel, kimeneti méret, preview és információérték is.",
+    "RecommendedAction": "Javasolt lépések:\n\n1) Rendszerszintű LOG módban állítsd be a DaysBack értéket.\n2) Indítsd el a rendszer LOG csomagot.\n3) A csomagban először az AI_README.md fájlt olvasd.\n4) Ezután nézd meg az ai_summary.json állapotát.\n5) A commands mappában először a COMMANDS_README.md és native-command-catalog.json fájlokat olvasd.\n6) A native-command-results.json már mutatja, melyik parancs adott tényleges információt és melyik nem.\n7) Csak azután nyisd meg az egyes .txt kimeneteket.\n8) Ha egy parancs NoOutput állapotú, azt ne rendszerhibaként kezeld, hanem nézd meg a parancs célját és korlátait.",
+    "DetailedSteps": "Javasolt lépések:\n\n1) Rendszerszintű LOG módban állítsd be a DaysBack értéket.\n2) Indítsd el a rendszer LOG csomagot.\n3) A csomagban először az AI_README.md fájlt olvasd.\n4) Ezután nézd meg az ai_summary.json állapotát.\n5) A commands mappában először a COMMANDS_README.md és native-command-catalog.json fájlokat olvasd.\n6) A native-command-results.json már mutatja, melyik parancs adott tényleges információt és melyik nem.\n7) Csak azután nyisd meg az egyes .txt kimeneteket.\n8) Ha egy parancs NoOutput állapotú, azt ne rendszerhibaként kezeld, hanem nézd meg a parancs célját és korlátait.",
     "ToolTip": "Rendszerszintű Windows 11 evidence csomag.",
     "ExpectedOutput": "logs/evidence_packages/*.zip",
     "Impact": "Low: olvasás/gyűjtés."

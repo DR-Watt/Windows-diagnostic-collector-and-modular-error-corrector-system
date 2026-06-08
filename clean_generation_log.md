@@ -1,22 +1,19 @@
-# CLEAN Generation Log — DiagFramework v1.2.9
+# CLEAN generation log — DiagFramework v1.2.10
 
-- Generated: 2026-06-08T13:02:26.870985+00:00
-- Format: Markdown
-- Scope: UI scope selection, top hint layout, system evidence collector hardening, manifest detail text expansion.
+- Generated: 2026-06-08T13:42:56.076388
+- Scope: native command metadata, command catalog, command descriptions
+- Trigger: uploaded native-command-results.json only contained command names and stdout/stderr paths; Args was empty and command purpose was missing.
 
 ## Modified files
 
-- MainWindow.xaml
-- Launcher.ps1
-- config/ui.hu-HU.json
-- modules/*/manifest.json
 - modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1
-- tools/Collect-SystemEvidence.ps1
-- docs/module_roadmap_windows_errors.md
-- README_v1.2.9.md
+- modules/SystemEvidenceCollector/manifest.json
+- docs/native_commands_reference.md
+- README_v1.2.10.md
+- clean_generation_log.md
 
 ## Validation
 
-- JSON files parsed successfully.
-- ZIP integrity checked.
-- Runtime PowerShell validation must run on Windows 11 / PowerShell 7.6.2.
+- JSON manifests parsed successfully.
+- ZIP integrity tested.
+- PowerShell runtime test not executed in this environment.
