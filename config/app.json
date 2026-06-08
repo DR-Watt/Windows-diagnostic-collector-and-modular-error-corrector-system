@@ -1,0 +1,10 @@
+{
+  "SchemaVersion": "diagframework.appconfig.v1",
+  "ProductName": "Windows 11 Update Repair",
+  "AppName": "DiagFramework",
+  "Version": "1.3.2",
+  "BuildName": "System Evidence Truncated Fix + Progress UI",
+  "ReleaseChannel": "MVP",
+  "WindowTitleFormat": "{ProductName} - {AppName} v{Version} {BuildName}",
+  "GeneratedAt": "2026-06-08T17:40:00+02:00"
+}

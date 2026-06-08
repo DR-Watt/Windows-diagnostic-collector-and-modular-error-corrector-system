@@ -1,87 +1,59 @@
-# CLEAN Generation Log — DiagFramework v1.3.1 System Evidence Quality Fix Pack
+# CLEAN Generation Log — DiagFramework v1.3.2
 
 ## Build metadata
 
-- Project: Windows diagnostic collector and modular error corrector system
-- Version: v1.3.1
-- Build type: SystemEvidenceCollector quality fix
-- Timestamp: 2026-06-08T18:30:00+02:00
-- Output format: Markdown changelog
+- Generated: 2026-06-08T17:27:08.981777+00:00
+- Version: 1.3.2
+- Build: System Evidence Truncated Fix + Progress UI
+- Package type: PATCH_ONLY
 
-## Input evidence
+## Trigger
 
-A v1.3.0 futás `OKWithWarnings` állapotot adott, `ErrorCount=0`, `WarningCount=3`. A minőségi elemzés három fejlesztendő pontot azonosított:
+The v1.3.1 SystemEvidenceCollector completed most of the package but failed at the end with:
 
-1. `disk-event-map.json`: a magyar Event ID 153 üzenetekből a disk szám nem töltődött (`DiskNumber=null`).
-2. `wer-summary.json`: `ReportCount=0`, miközben a manifest sok `Report.wer` fájlt tartalmazott.
-3. `copied_logs`: Panther / Rollback alatt túl sok bináris és nem log jellegű fájl került be.
+```text
+The property 'Truncated' cannot be found on this object. Verify that the property exists.
+```
 
-## Módosított fájlok
+The GUI still displayed an older v1.2.9 title, and long evidence collection did not provide enough progress feedback.
 
-- `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
-- `docs/system_evidence_schema_v1_3_1.md`
-- `docs/collector_acceptance_tests_v1_3_1.md`
-- `clean_generation_log.md`
+## Root cause
 
-## Implementált javítások
+`New-SummaryObject` assumed that every event summary row had a `Truncated` property. Warning rows such as `LogNotPresent` or `NoMatchingEvents` can omit this property, so strict property access caused a runtime failure at final summary generation.
 
-### Disk Event ID 153 parser
+## Changes
 
-Új függvények:
+1. `SystemEvidenceCollector.ps1`
+   - version bumped to 1.3.2
+   - added `Get-ObjectPropertyValueSafe`
+   - `TruncatedEventLogs` generation is property-safe
 
-- `Parse-Disk153Message`
-- `New-Disk153Aggregate`
+2. `config/app.json`
+   - centralized product/version/build metadata
 
-Kezelt minták:
+3. `Launcher.ps1`
+   - reads title/version from `config/app.json`
+   - adds progress UI helpers
+   - shows progress status for diagnostics and collector button operations
 
-- magyar: `2 jelű lemez`
-- magyar: `PDO objektum neve: \Device\...`
-- magyar: `0x8000 logikai blokkcím`
-- angol fallback: `disk 2`, `PDO name`, `logical block address`
+4. `MainWindow.xaml`
+   - status bar now contains `ProgressBar prgOperation`
+   - added `txtProgressDetail`
 
-### WER summary útvonaljavítás
+5. `modules/SystemEvidenceCollector/manifest.json`
+   - version bumped to 1.3.2
+   - UI text updated for current P0 evidence scope
 
-Új függvények:
+## Validation
 
-- `Read-WerReportFile`
-- `Get-WerValueSafe`
+- JSON files parsed successfully.
+- ZIP integrity checked.
+- PowerShell runtime validation was not executable in this Linux container.
 
-Források:
+## diagnostics_starter_pack
 
-- `copied_logs\ReportArchive`
-- `copied_logs\ReportQueue`
-- `vendor_logs`
+Run first:
 
-### copied_logs policy
-
-Új policy függvények:
-
-- `Get-SystemLogCopyPolicy`
-- `Get-SetupLogCopyPolicy`
-
-Új outputok:
-
-- `copied_logs/skipped-files.json`
-- `copied_logs/system-log-copy-policy.json`
-- `copied_logs/setup-log-copy-policy.json`
-
-### ai_summary v3
-
-Új mezők:
-
-- `TruncatedEventLogCount`
-- `TruncatedEventLogs`
-- `WarningsByCode`
-
-## Validáció
-
-- JSON dokumentumok: szintaktikailag ellenőrizve.
-- ZIP integritás: ellenőrizve.
-- PowerShell runtime teszt: nem futtatható ebben a konténerben, kliensoldali PowerShell 7.6.2 validáció szükséges.
-
-## Runtime sorrend
-
-1. Patch kicsomagolása a repo gyökerébe.
-2. `./diagnostics/Initialize-DiagEnvironment.ps1`
-3. `./tools/Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200`
-4. `ai_summary.json`, `storage/disk-event-153-aggregate.json`, `wer/wer-summary.json`, `copied_logs/skipped-files.json` ellenőrzése.
+```powershell
+.\diagnostics\Initialize-DiagEnvironment.ps1
+```

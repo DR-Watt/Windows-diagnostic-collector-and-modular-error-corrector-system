@@ -46,6 +46,47 @@ function Import-UiResources {
     Get-Content -LiteralPath $candidate -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 $script:Ui = Import-UiResources -CultureName $Culture
+
+function Import-AppConfig {
+    $candidate = Join-Path $ScriptRoot 'config\app.json'
+    if (-not (Test-Path -LiteralPath $candidate)) {
+        return [PSCustomObject]@{
+            ProductName='Windows 11 Update Repair'
+            AppName='DiagFramework'
+            Version='0.0.0'
+            BuildName='local'
+            WindowTitleFormat='{ProductName} - {AppName} v{Version} {BuildName}'
+        }
+    }
+    try { return (Get-Content -LiteralPath $candidate -Raw -Encoding UTF8 | ConvertFrom-Json) }
+    catch {
+        return [PSCustomObject]@{
+            ProductName='Windows 11 Update Repair'
+            AppName='DiagFramework'
+            Version='0.0.0'
+            BuildName='config-error'
+            WindowTitleFormat='{ProductName} - {AppName} v{Version} {BuildName}'
+        }
+    }
+}
+$script:AppConfig = Import-AppConfig
+function Get-AppConfigValue { param([string]$Name,[string]$Default='')
+    try { if ($script:AppConfig -and $script:AppConfig.PSObject.Properties[$Name]) { return [string]$script:AppConfig.$Name } } catch { }
+    return $Default
+}
+function Get-AppTitle {
+    $fmt = Get-AppConfigValue -Name 'WindowTitleFormat' -Default '{ProductName} - {AppName} v{Version}'
+    $title = $fmt
+    foreach ($kv in @{
+        ProductName=(Get-AppConfigValue -Name 'ProductName' -Default 'Windows 11 Update Repair')
+        AppName=(Get-AppConfigValue -Name 'AppName' -Default 'DiagFramework')
+        Version=(Get-AppConfigValue -Name 'Version' -Default '0.0.0')
+        BuildName=(Get-AppConfigValue -Name 'BuildName' -Default '')
+    }.GetEnumerator()) {
+        $title = $title.Replace(('{' + $kv.Key + '}'), [string]$kv.Value)
+    }
+    return ($title -replace '\s+', ' ').Trim()
+}
 function Get-UiValue { param([string]$Path,[string]$Default='')
     $node = $script:Ui
     foreach ($part in ($Path -split '\.')) { if ($null -eq $node -or -not $node.PSObject.Properties[$part]) { return $Default }; $node=$node.$part }
@@ -80,6 +121,8 @@ $txtStatus = $window.FindName('txtStatus')
 $txtSelectedSummary = $window.FindName('txtSelectedSummary')
 $txtSelectedAction = $window.FindName('txtSelectedAction')
 $chkWhatIf = $window.FindName('chkWhatIf')
+$prgOperation = $window.FindName('prgOperation')
+$txtProgressDetail = $window.FindName('txtProgressDetail')
 
 function Set-ControlTextFromUi { param([string]$Name,$Control)
     $cfg = $script:Ui.Controls.$Name
@@ -90,9 +133,9 @@ function Set-ControlTextFromUi { param([string]$Name,$Control)
     if ($cfg.PSObject.Properties['ToolTip']) { $Control.ToolTip = [string]$cfg.ToolTip }
 }
 function Apply-UiResources {
-    $title = Get-UiValue -Path 'Window.Title' -Default 'DiagFramework'
+    $title = Get-AppTitle
     if (-not [string]::IsNullOrWhiteSpace($title)) { $window.Title = $title }
-    foreach ($name in @('btnReloadModules','btnScan','btnRunSelected','btnRollbackSelected','chkWhatIf','btnSearchUpdates','btnInstallUpdates','chkSystemLogMode','lblTargetKB','txtTargetKB','lblDaysBack','txtDaysBack','btnAiLogPackage','btnEvidencePackage','btnOpenLogs','txtTopHint','grpModules','grpSummary','grpRecommendedAction','grpLog','grpUsageNotes','txtUsageNotes','txtStatus')) {
+    foreach ($name in @('btnReloadModules','btnScan','btnRunSelected','btnRollbackSelected','chkWhatIf','btnSearchUpdates','btnInstallUpdates','chkSystemLogMode','lblTargetKB','txtTargetKB','lblDaysBack','txtDaysBack','btnAiLogPackage','btnEvidencePackage','btnOpenLogs','txtTopHint','grpModules','grpSummary','grpRecommendedAction','grpLog','grpUsageNotes','txtUsageNotes','txtStatus','txtProgressDetail')) {
         $c=$window.FindName($name); if ($c) { Set-ControlTextFromUi -Name $name -Control $c }
     }
 }
@@ -103,6 +146,25 @@ function Add-UiLog { param([string]$Message)
     $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
     $txtLog.AppendText("[$stamp] $Message`r`n")
     $txtLog.ScrollToEnd()
+}
+function Invoke-UiRefresh {
+    try { $window.Dispatcher.Invoke([Action]{}, [System.Windows.Threading.DispatcherPriority]::Background) | Out-Null } catch { }
+}
+function Set-OperationProgress {
+    param([bool]$Busy, [string]$Message = '', [string]$Detail = '')
+    try {
+        if ($Busy) {
+            if ($prgOperation) { $prgOperation.Visibility='Visible'; $prgOperation.IsIndeterminate=$true }
+            if ($txtProgressDetail) { $txtProgressDetail.Text = $Detail }
+            if (-not [string]::IsNullOrWhiteSpace($Message)) { $txtStatus.Text = $Message }
+        }
+        else {
+            if ($prgOperation) { $prgOperation.IsIndeterminate=$false; $prgOperation.Value=0; $prgOperation.Visibility='Collapsed' }
+            if ($txtProgressDetail) { $txtProgressDetail.Text = '' }
+            if (-not [string]::IsNullOrWhiteSpace($Message)) { $txtStatus.Text = $Message }
+        }
+        Invoke-UiRefresh
+    } catch { }
 }
 function Get-IsSystemLogMode { return [bool]$chkSystemLogMode.IsChecked }
 function Update-LogScopeUi {
@@ -165,6 +227,7 @@ function Refresh-ModuleList {
 }
 function Run-Diagnostics {
     $btnScan.IsEnabled=$false; $btnRun.IsEnabled=$false
+    Set-OperationProgress -Busy $true -Message 'Diagnosztika folyamatban...' -Detail 'Modulok ellenőrzése'
     try {
         $systemMode = Get-IsSystemLogMode
         $targetKb = if ($systemMode) { '' } else { Get-TargetKbFromUi }
@@ -186,7 +249,7 @@ function Run-Diagnostics {
         $lvResults.ItemsSource=$null; $lvResults.ItemsSource=$script:CurrentItems
         $count = @($script:CurrentItems | Where-Object { $_.Selected }).Count
         $txtStatus.Text = Format-UiMessage -Key 'DiagComplete' -Default 'Diagnosztika kész. Talált javasolt elemek: {0}' -Args @($count)
-    } finally { $btnScan.IsEnabled=$true; $btnRun.IsEnabled=$true; Update-LogScopeUi; Update-DetailPanes }
+    } finally { Set-OperationProgress -Busy $false -Message 'Diagnosztika befejezve.'; $btnScan.IsEnabled=$true; $btnRun.IsEnabled=$true; Update-LogScopeUi; Update-DetailPanes }
 }
 function Run-SelectedFixes {
     $selected = @($lvResults.ItemsSource | Where-Object { $_.Selected -and $_.FixAvailable })
@@ -195,6 +258,7 @@ function Run-SelectedFixes {
     $answer = [System.Windows.MessageBox]::Show((Format-UiMessage -Key 'ConfirmRunBody' -Default "Futtassam a kijelölt műveleteket?`n`nMód: {0}`nElemek: {1}" -Args @($mode,$selected.Count)),(Format-UiMessage -Key 'ConfirmRunTitle' -Default 'Megerősítés'),'YesNo','Warning')
     if ($answer -ne 'Yes') { return }
     $btnRun.IsEnabled=$false
+    Set-OperationProgress -Busy $true -Message 'Kijelölt műveletek futnak...' -Detail 'Javítás / gyűjtés folyamatban'
     try {
         $systemMode = Get-IsSystemLogMode; $daysBack = Get-DaysBackFromUi; $targetKb = if ($systemMode) { '' } else { Get-TargetKbFromUi }
         foreach ($it in $selected) {
@@ -208,7 +272,7 @@ function Run-SelectedFixes {
             } catch { Add-UiLog "MŰVELETI HIBA $($it.ModuleId): $($_.Exception.Message)" }
         }
         $txtStatus.Text='Műveleti kör befejezve. Javasolt új diagnosztikát futtatni.'
-    } finally { $btnRun.IsEnabled=$true; Update-LogScopeUi }
+    } finally { Set-OperationProgress -Busy $false -Message 'Műveleti kör befejezve.'; $btnRun.IsEnabled=$true; Update-LogScopeUi }
 }
 function Run-SelectedRollback {
     $selected = @($lvResults.ItemsSource | Where-Object { $_.Selected })
@@ -222,6 +286,8 @@ function Install-UpdatesWithPSWindowsUpdate { $answer=[System.Windows.MessageBox
 function Invoke-CollectorModuleFromButton { param([string]$ModuleId,[string]$DoneMessageKey,[string]$DefaultDoneMessage,$Button)
     $Button.IsEnabled=$false
     try {
+        $progressLabel = if ($ModuleId -eq 'SystemEvidenceCollector') { 'Rendszer LOG: EVTX, WindowsUpdate, DISM/SFC, storage, WER, ZIP' } else { 'Célzott KB LOG: Windows Update, CBS/DISM, eseménynaplók, ZIP' }
+        Set-OperationProgress -Busy $true -Message ($ModuleId + ' csomag készítése folyamatban...') -Detail $progressLabel
         $systemMode=Get-IsSystemLogMode; $daysBack=Get-DaysBackFromUi; $targetKb=if ($systemMode) { '' } else { Get-TargetKbFromUi }
         $module = Get-RegisteredDiagModules | Where-Object Id -eq $ModuleId | Select-Object -First 1
         if (-not $module) { throw "A $ModuleId modul nem található." }
@@ -233,7 +299,7 @@ function Invoke-CollectorModuleFromButton { param([string]$ModuleId,[string]$Don
         Add-UiLog (($res | ConvertTo-Json -Depth 12))
         if ($res.PSObject.Properties['ZipPath']) { [System.Windows.MessageBox]::Show((Format-UiMessage -Key $DoneMessageKey -Default $DefaultDoneMessage -Args @($res.ZipPath)),'DiagFramework','OK','Information') | Out-Null }
     } catch { Add-UiLog "$ModuleId csomag hiba: $($_.Exception.Message)"; [System.Windows.MessageBox]::Show($_.Exception.Message,"$ModuleId csomag hiba",'OK','Error') | Out-Null }
-    finally { Update-LogScopeUi }
+    finally { Set-OperationProgress -Busy $false -Message 'LOG csomag művelet befejezve.'; Update-LogScopeUi }
 }
 function Open-LogsFolder { $paths=Get-DiagPaths; if (-not (Test-Path $paths.LogPath)) { New-Item -Path $paths.LogPath -ItemType Directory -Force | Out-Null; Add-UiLog (Format-UiMessage -Key 'OpenLogsMissingCreated' -Default 'A logs mappa nem létezett, ezért létrehoztam.') }; Start-Process explorer.exe -ArgumentList ('"{0}"' -f $paths.LogPath) | Out-Null }
 
@@ -252,5 +318,5 @@ $chkSystemLogMode.Add_Unchecked({ Update-LogScopeUi })
 
 Refresh-ModuleList
 Update-LogScopeUi
-Add-UiLog (Format-UiMessage -Key 'Started' -Default 'DiagFramework Windows Update Repair v1.2.9 elindult.')
+Add-UiLog ((Get-AppTitle) + ' elindult.')
 $window.ShowDialog() | Out-Null

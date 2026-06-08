@@ -19,7 +19,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ModuleId = 'SystemEvidenceCollector'
-$ModuleVersion = '1.3.1'
+$ModuleVersion = '1.3.2'
 
 function Get-Metadata {
     [PSCustomObject]@{
@@ -862,15 +862,40 @@ function New-PackageManifestSafe {
     }
 }
 
+function Get-ObjectPropertyValueSafe {
+    param(
+        [AllowNull()][object]$Object,
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()][object]$Default = $null
+    )
+    try {
+        if ($null -ne $Object -and $Object.PSObject.Properties[$Name]) {
+            return $Object.PSObject.Properties[$Name].Value
+        }
+    }
+    catch { }
+    return $Default
+}
+
 function New-SummaryObject {
     param([string]$Status,[string]$PackageRoot,[string]$ZipPath,[string]$TargetKB,[int]$DaysBack,[int]$MaxEvents,$EventSummary=@(),$Copied=@(),$NativeResults=@(),$Issues=@(),$P0Results=@())
     $split = Split-IssuesBySeverity -Issues $Issues
-    $truncated = @(@($EventSummary) | Where-Object { $_.Truncated -eq $true } | ForEach-Object {
-        [PSCustomObject]@{ LogName=$_.LogName; Count=$_.Count; OutputFile=$_.OutputFile; OutputEvtx=$_.OutputEvtx; Note='JSONL truncated; raw EVTX available when OutputEvtx is populated.' }
-    })
+    $truncated = @(
+        @($EventSummary) |
+        Where-Object { [bool](Get-ObjectPropertyValueSafe -Object $_ -Name 'Truncated' -Default $false) } |
+        ForEach-Object {
+            [PSCustomObject]@{
+                LogName = Get-ObjectPropertyValueSafe -Object $_ -Name 'LogName' -Default ''
+                Count = Get-ObjectPropertyValueSafe -Object $_ -Name 'Count' -Default 0
+                OutputFile = Get-ObjectPropertyValueSafe -Object $_ -Name 'OutputFile' -Default ''
+                OutputEvtx = Get-ObjectPropertyValueSafe -Object $_ -Name 'OutputEvtx' -Default $null
+                Note = 'JSONL truncated; raw EVTX available when OutputEvtx is populated.'
+            }
+        }
+    )
     $warningsByCode = @(@($split.Warnings) | Group-Object Code | Sort-Object Count -Descending | ForEach-Object { [PSCustomObject]@{ Code=$_.Name; Count=$_.Count } })
     [PSCustomObject]@{
-        SchemaVersion='diagframework.systemevidence.summary.v3'
+        SchemaVersion='diagframework.systemevidence.summary.v3.1'
         ModuleId=$ModuleId
         ModuleVersion=$ModuleVersion
         Status=$Status
@@ -907,7 +932,7 @@ function Invoke-EvidenceCollection {
     $issues=@(); $eventSummary=@(); $copied=@(); $nativeResults=@(); $p0Results=@()
     Add-ProgressEvent $packageRoot 'Start' 'OK' "DaysBack=$DaysBack MaxEvents=$MaxEvents TargetKB=$TargetKB WhatIf=$($WhatIf.IsPresent)"
     if ($WhatIf) {
-        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v3'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256') }
+        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v3.1'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256') }
         Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
         return $summary
     }

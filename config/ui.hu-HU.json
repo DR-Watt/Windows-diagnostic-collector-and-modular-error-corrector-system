@@ -3,7 +3,7 @@
   "Culture": "hu-HU",
   "GeneratedForVersion": "1.2.9",
   "Window": {
-    "Title": "Windows 11 Update Repair - DiagFramework v1.2.9 UI Scope & System Log"
+    "Title": "DiagFramework"
   },
   "Controls": {
     "btnReloadModules": {
@@ -87,6 +87,9 @@
     },
     "txtStatus": {
       "Text": "Készen áll."
+    },
+    "txtProgressDetail": {
+      "Text": ""
     }
   },
   "Messages": {

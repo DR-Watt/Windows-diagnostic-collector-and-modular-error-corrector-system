@@ -101,6 +101,13 @@
       <StatusBarItem>
         <TextBlock Name="txtStatus"/>
       </StatusBarItem>
+      <Separator/>
+      <StatusBarItem>
+        <ProgressBar Name="prgOperation" Width="230" Height="14" Minimum="0" Maximum="100" Value="0" IsIndeterminate="False" Visibility="Collapsed"/>
+      </StatusBarItem>
+      <StatusBarItem>
+        <TextBlock Name="txtProgressDetail" Foreground="#4F6D8A" Text=""/>
+      </StatusBarItem>
     </StatusBar>
   </Grid>
 </Window>
