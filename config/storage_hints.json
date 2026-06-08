@@ -1,7 +1,7 @@
 {
   "SchemaVersion": "diagframework.storage.hints.v1",
   "Source": "UserProvidedProjectContext",
-  "Notes": "Disk 2 and Disk 3 are two 8TB SATA HDDs attached to the onboard Intel RAID controller. RAID is configured in JBOD mode.",
+  "Notes": "Disk 2 and Disk 3 are user-provided context. v1.3.4 validates this hint against detected Windows RAID/PhysicalDisk/PnP topology.",
   "KnownDiskGroups": [
     {
       "GroupName": "Intel RAID JBOD SATA HDD pair",
@@ -15,5 +15,7 @@
       "ExpectedDriveDescription": "2x8TB SATA HDD",
       "DiagnosticMeaning": "Event ID 153 on these disks should be interpreted primarily as storage I/O retry on the SATA HDD / Intel RAID controller / RST driver / cable-port-power path, not as standalone Windows Update evidence."
     }
-  ]
+  ],
+  "InterpretationMode": "ContextHintOnly_NotAuthoritative",
+  "ValidationPolicy": "Prefer detected-storage-topology.json over storage_hints.json when conflicts are found."
 }

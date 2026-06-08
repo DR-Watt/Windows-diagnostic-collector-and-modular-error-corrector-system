@@ -1,35 +1,34 @@
-# CLEAN Generation Log — DiagFramework v1.3.3 Storage Correlation Pack
+# CLEAN generation log — DiagFramework v1.3.4 Storage Topology Truth Pack
 
-## Build metadata
+## Build
 
-- Timestamp: `2026-06-08T17:58:09.508735+00:00`
-- Version: `1.3.3`
-- Build type: patch-only
-- Main module: `SystemEvidenceCollector`
+- Timestamp: `2026-06-08T18:41:20.905440+00:00`
+- Version: `1.3.4`
+- Type: PATCH_ONLY
 
-## User-provided diagnostic context
+## Változtatás oka
 
-Disk 2 and Disk 3 are two 8TB SATA HDDs attached to the onboard Intel RAID controller. RAID mode is JBOD.
+A v1.3.3 futás igazolta, hogy a Disk 153 korreláció működik, de a `storage_hints.json` túl erősen tényként jelent meg. A Windows mapping Intel Raid 0 / Intel Raid 1 volume objektumokat mutatott, ezért a UserProvidedTopology és DetectedTopology szétválasztása szükséges.
 
-## Implemented items
-
-1. Disk 2 / Disk 3 → Get-Disk / PhysicalDisk / Win32_DiskDrive mapping.
-2. PDO object name → storage controller / driver snapshot context.
-3. Event ID 153 timeline.
-4. Disk 153 event correlation with Windows Update / Setup / Kernel-Boot / Kernel-PnP time windows.
-5. Dedicated storage risk summary.
-6. ai_summary.json TopFindings / RiskIndicators / SuggestedNextEvidence fields.
-
-## Changed files
+## Módosított fájlok
 
 - `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
 - `modules/SystemEvidenceCollector/manifest.json`
 - `config/app.json`
 - `config/storage_hints.json`
-- `docs/storage_correlation_schema_v1_3_3.md`
-- `docs/collector_acceptance_tests_v1_3_3.md`
+- `docs/storage_topology_truth_schema_v1_3_4.md`
+- `docs/collector_acceptance_tests_v1_3_4.md`
+- `docs/p1_normalizers_plan_v1_4_0.md`
 - `clean_generation_log.md`
 
-## Runtime validation
+## Új outputok
 
-Not executed in this Linux container. ZIP and JSON syntax were validated during generation.
+- `storage/detected-storage-topology.json`
+- `storage/storage-hint-validation.json`
+- `storage/raid-volume-map.json`
+- `storage/physical-disk-candidate-map.json`
+- `analysis/target-kb-correlation.json`
+
+## Következő fejlesztési lépcső
+
+A v1.3.4 után a következő csomag a P1 normalizálók csomagja legyen: WER, SetupAPI, CBS, Driver/PnP, WindowsUpdate error és event-correlation normalizálás.
