@@ -1,17 +1,17 @@
 {
   "Id": "SystemEvidenceCollector",
   "Name": "Rendszer LOG bizonyítékgyűjtő",
-  "Version": "1.2.0",
+  "Version": "1.2.1",
   "Author": "DiagTeam",
   "Script": "SystemEvidenceCollector.ps1",
   "Risk": "Low",
   "Category": "EvidenceCollection",
-  "Description": "Általános Windows 11 boot, setup, driver, crash, update és gyártói diagnosztikai LOG csomagot készít AI vagy külső szakértő számára. Nem javít rendszert.",
+  "Description": "Általános Windows 11 boot, setup, driver, crash, update és gyártói diagnosztikai LOG csomagot készít AI vagy külső szakértő számára. v1.2.1: lépésenként hibaszigetelt, részleges csomagot is készít, és gyökérszintű AI_README fájlokat generál. Nem javít rendszert.",
   "Ui": {
-    "Summary": "Általános rendszerbizonyíték-csomagot készít Windows 11 frissítési, boot, driver, setup, crash és gyártói diagnosztikai hibák elemzéséhez.",
-    "RecommendedAction": "Ismétlődő újraindulás, rollback, driver-összeférhetetlenség, telepítési hiba vagy gyártói diagnosztikai futtatás után futtasd. A modul nem javít rendszert, csak strukturált ZIP-et készít.",
-    "ToolTip": "Boot/setup/update/driver események, CBS/DISM/Panther/SetupAPI/WER/minidump metaadatok és ismert vendor log helyek gyűjtése.",
-    "ExpectedOutput": "logs/evidence_packages/<timestamp>-<computer>-SystemEvidence.zip",
-    "Impact": "Low: olvasási és fájlmásolási művelet, rendszerjavítást nem végez."
+    "Summary": "Általános rendszerbizonyíték-csomagot készít Windows 11 frissítési, boot, driver, setup, crash és gyártói diagnosztikai hibák elemzéséhez. v1.2.1-ben részleges hiba esetén is megmarad az elemzési csomag.",
+    "RecommendedAction": "Ismétlődő újraindulás, rollback, driver-összeférhetetlenség, telepítési hiba vagy gyártói diagnosztikai futtatás után futtasd. Ha a státusz Partial, először az errors/collector-errors.json és collector-progress.jsonl fájlokat elemeztesd AI-val.",
+    "ToolTip": "Boot/setup/update/driver események, CBS/DISM/Panther/SetupAPI/WER/minidump metaadatok és ismert vendor log helyek gyűjtése. Hiba esetén is részleges ZIP-et készít.",
+    "ExpectedOutput": "logs/evidence_packages/<timestamp>-<computer>-SystemEvidence[-KBxxxxxxx].zip",
+    "Impact": "Low: olvasási és fájlmásolási művelet, rendszerjavítást nem végez. Root AI_README fájlokat hoz létre a logs könyvtárban."
   }
 }

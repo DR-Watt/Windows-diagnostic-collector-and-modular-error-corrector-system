@@ -1,4 +1,19 @@
-# DiagFramework Windows Update Repair MVP v1.2.0 — Structured AI UI & Evidence Pack
+# DiagFramework Windows Update Repair MVP v1.2.1 — Structured AI UI & System Evidence Hotfix
+
+## v1.2.1 hotfix összefoglaló
+
+Ez a build a `SystemEvidenceCollector` hibaszigetelését javítja. A rendszer LOG csomag most már részleges adatforrás-hiba esetén is megpróbál `ai_summary.json`, `collector-progress.jsonl`, `errors/collector-errors.json`, `manifest.json`, `AI_README.md` és ZIP csomagot készíteni.
+
+Új gyökérszintű AI útmutatók:
+
+```text
+logs\AI_README.md
+logs\evidence_packages\AI_README.md
+logs\ai_packages\AI_README.md
+```
+
+A gyűjtőmodul továbbra sem végez javítást, csak bizonyítékot gyűjt.
+
 
 ## Cél
 

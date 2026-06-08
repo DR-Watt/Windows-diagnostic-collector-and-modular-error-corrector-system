@@ -1,115 +1,79 @@
-# CLEAN Generation Log — DiagFramework v1.2.0
+# CLEAN Generation Log — DiagFramework v1.2.1 SystemEvidence Hotfix
 
-## Build metadata
+- **GeneratedAt:** 2026-06-08T10:36:19.306686+02:00
+- **Project:** Windows diagnostic collector and modular error corrector system
+- **Version:** 1.2.1
+- **Change type:** Hotfix / robustness hardening
+- **Scope:** CLEAN kódgenerálási LOG, nem futó szoftver által generált rendszer LOG
 
-- **Project:** DiagFramework Windows Update Repair MVP
-- **Version:** 1.2.0
-- **Generated at:** 2026-06-08T07:45:34+00:00
-- **Generator log schema:** clean-generation-log.md/v1
-- **Purpose:** UI/manifest/log architecture refactor according to the updated project instructions.
+## Cél
 
-## Development changelog
+A `SystemEvidenceCollector` modul `Argument types do not match` hibájának megelőzése és a rendszer LOG csomag AI-elemzésének javítása.
 
-### Added
+## Hibakép
 
-- `config/ui.hu-HU.json` structured UI resource file for labels, button text, tooltips and main user messages.
-- `modules/SystemEvidenceCollector/` read-only evidence collector module for Windows boot/setup/update/driver/crash/vendor diagnostic evidence.
-- `tools/Collect-SystemEvidence.ps1` CLI wrapper.
-- `collect_system_evidence.bat` quick launcher.
-- `validators/Validate-UiResources.ps1` validator for localized UI resources.
-- Manifest `Ui` blocks for module-level Summary, RecommendedAction, ToolTip, ExpectedOutput and Impact metadata.
+A felhasználói futás szerint a GUI logban a rendszer LOG csomag készítése az alábbi hibával állt meg:
 
-### Changed
+```text
+SystemEvidenceCollector csomag hiba: Argument types do not match
+```
 
-- `MainWindow.xaml`: summary/action text removed from the main module table and moved into two dedicated scrollable right-side panels.
-- `Launcher.ps1`: loads UI strings from `config/ui.hu-HU.json`, applies tooltips, reads module explanatory text from each manifest, and exposes the new System Evidence package button.
-- `validators/Validate-Manifests.ps1`: validates module UI metadata, not just script references.
-- `diagnostics/Initialize-DiagEnvironment.ps1`: runs both manifest and UI resource validators.
-- `README.md`: updated to v1.2.0 structure and usage.
+A feltöltött `collector-progress.jsonl` alapján a futás a `DriverSnapshot` után állt meg. Ez a v1.2.0 kód alapján az eseménynapló-gyűjtés, logmásolás vagy manifest/ZIP szakasz környékére szűkíthető.
 
-### Removed
+## Módosított fájlok
 
-- `clean_generation_log.txt`; CLEAN generation logs now use Markdown format as the build/changelog document.
+| Fájl | Művelet | Megjegyzés |
+|---|---|---|
+| `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1` | módosítva | v1.2.1 hibaszigetelt gyűjtés, root AI_README generálás, részleges csomag |
+| `modules/SystemEvidenceCollector/manifest.json` | módosítva | verzió és UI magyarázat frissítve |
+| `tools/Collect-SystemEvidence.ps1` | módosítva | `MaxEvents` és opcionális `TargetKB` támogatás |
+| `collect_system_evidence.bat` | módosítva | CLI paraméterek bővítése |
+| `config/ui.hu-HU.json` | módosítva | v1.2.1 szövegek és tooltip |
+| `validators/Validate-SystemEvidencePackage.ps1` | új | SystemEvidence ZIP/mappa szerkezeti validátor |
+| `logs/AI_README.md` | új | LOG gyökér AI útmutató |
+| `logs/evidence_packages/AI_README.md` | új | SystemEvidence gyökér AI útmutató |
+| `logs/ai_packages/AI_README.md` | új | célzott AI csomagok gyökér útmutató |
+| `README.md` | módosítva | v1.2.1 használati leírás |
+| `clean_generation_log.md` | módosítva | Markdown changelog/build log |
 
-## GitHub input used
+## Technikai javítások
 
-The build design used the following GitHub repositories as architectural input:
+1. A rendszer LOG gyűjtés már nem egyetlen törékeny folyamatlánc.
+2. Minden fő lépés saját hibakezelést és `collector-progress.jsonl` bejegyzést kap.
+3. A `Get-WinEvent` kimenet laposított, serializálható objektummá alakul.
+4. A registry értékek mély .NET objektumok helyett név/érték párokká alakulnak.
+5. A relatív útvonal-képzés típusbiztos wrapperbe került.
+6. A ZIP-manifest készítés hibája nem akadályozza meg az addig létrejött csomag elemzését.
+7. A `logs` és `logs/evidence_packages` gyökér is kap AI_README fájlt.
 
-- DR-Watt/Windows-diagnostic-collector-and-modular-error-corrector-system
-- DR-Watt/WindowsRescue
-- DR-Watt/Windows-Repair-Tool
-- DR-Watt/Windows-Maintenance-Tool
-- DR-Watt/WindowsMaintenance
+## Futtatási sorrend
 
-The external repositories were used as design references, not as direct code imports.
+```powershell
+Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_1_system_evidence_hotfix
+.\install_and_run.bat
+```
 
-## Generated / modified files
+CLI rendszer LOG gyűjtés:
 
-- `DiagFramework.psm1`
-- `Launcher.ps1`
-- `MainWindow.xaml`
-- `README.md`
-- `collect_ai_logs_for_kb5089573.bat`
-- `collect_system_evidence.bat`
-- `config/ui.hu-HU.json`
-- `diagnostics/Initialize-DiagEnvironment.ps1`
-- `hotfix_001_fix_lastexitcode.ps1`
-- `hotfix_002_ai_log_collector_notes.ps1`
-- `install_and_run.bat`
-- `modules/AILogCollector/AILogCollector.ps1`
-- `modules/AILogCollector/manifest.json`
-- `modules/ComponentStoreRepair/ComponentStoreRepair.ps1`
-- `modules/ComponentStoreRepair/manifest.json`
-- `modules/PSWindowsUpdateManager/PSWindowsUpdateManager.ps1`
-- `modules/PSWindowsUpdateManager/manifest.json`
-- `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
-- `modules/SystemEvidenceCollector/manifest.json`
-- `modules/WUCacheReset/WUCacheReset.ps1`
-- `modules/WUCacheReset/manifest.json`
-- `modules/WUServiceHealth/WUServiceHealth.ps1`
-- `modules/WUServiceHealth/manifest.json`
-- `tools/Collect-AIPackage.ps1`
-- `tools/Collect-SystemEvidence.ps1`
-- `validators/Validate-AIPackage.ps1`
-- `validators/Validate-Manifests.ps1`
-- `validators/Validate-UiResources.ps1`
-- `workspace.code-workspace`
+```powershell
+.\tools\Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573
+```
 
-## Execution order
+Validálás:
 
-1. `install_and_run.bat`
-2. `diagnostics/Initialize-DiagEnvironment.ps1`
-3. `validators/Validate-Manifests.ps1`
-4. `validators/Validate-UiResources.ps1`
-5. `Launcher.ps1`
-6. User-selected GUI actions:
-   - diagnostics: module `Test-Condition`
-   - selected repair: module `Invoke-Fix`
-   - rollback: module `Invoke-Rollback`
-   - KB evidence: `modules/AILogCollector/AILogCollector.ps1`
-   - general system evidence: `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
+```powershell
+.\validators\Validate-SystemEvidencePackage.ps1 -PackagePath .\logs\evidence_packages\<package>.zip
+```
 
-## Validation log
+## Ismert korlátok
 
-- JSON syntax validation: completed for all manifest files and `config/ui.hu-HU.json`.
-- Structural validation target: manifest `Ui` block present for every module.
-- Runtime validation caveat: Windows 11 / PowerShell 7 / WPF execution cannot be performed inside this Linux container.
+- Windows runtime tesztet ebben a környezetben nem lehetett futtatni.
+- Egyes eseménynaplók hiányozhatnak vagy jogosultság miatt nem olvashatók; ez `errors/collector-errors.json` alatt jelenik meg.
+- A vendor loggyűjtés fájlszám- és méretkorláttal dolgozik.
 
-## Known limitations
+## Validáció
 
-- `SystemEvidenceCollector` uses broad known vendor folders under `%ProgramData%`; missing vendor folders are treated as non-errors.
-- Large copied files are skipped above the module default size threshold.
-- Some Windows Event Log channels may be unavailable depending on edition, policy, or logging configuration.
-- `Get-WindowsUpdateLog` may emit ETL schema warnings; these are preserved as diagnostic context.
+- JSON fájlok szintaxisa ellenőrizve.
+- ZIP integritás ellenőrizve.
+- Patch ZIP integritás ellenőrizve.
 
-## Documentation check summary
-
-- DISM/SFC flow follows Microsoft documented servicing and system file repair concepts.
-- Windows Update ETL conversion follows Microsoft `Get-WindowsUpdateLog` documentation.
-- Windows Update component reset remains rename/backup-oriented rather than destructive deletion.
-
-## CLEAN result
-
-- Full package ZIP generated separately.
-- Patch-only ZIP generated separately.
-- This Markdown file is the authoritative CLEAN build/changelog log for v1.2.0.
