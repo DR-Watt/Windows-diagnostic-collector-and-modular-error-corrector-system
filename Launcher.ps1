@@ -3,13 +3,14 @@
   WPF GUI indító Windows 11 Update diagnosztikai, javító és AI LOG gyűjtő keretrendszerhez.
 
 .DESCRIPTION
-  PowerShell 7.x + WPF/XAML interaktív felület. A script automatikusan
-  emelt jogosultságot és STA módot kér, mert a WPF-hez STA szál szükséges.
+  PowerShell 7.x + WPF/XAML interaktív felület. A v1.2.0 verzióban a UI feliratok,
+  tooltip-ek és fő üzenetek külön strukturált JSON fájlba kerültek: config\ui.hu-HU.json.
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$NoElevationCheck
+    [switch]$NoElevationCheck,
+    [string]$Culture = 'hu-HU'
 )
 
 Set-StrictMode -Version Latest
@@ -38,7 +39,8 @@ function Restart-SelfElevatedOrSta {
         '-ExecutionPolicy', 'Bypass',
         '-STA',
         '-File', ('"{0}"' -f $PSCommandPath),
-        '-NoElevationCheck'
+        '-NoElevationCheck',
+        '-Culture', $Culture
     )
 
     $startInfo = @{
@@ -67,6 +69,43 @@ Add-Type -AssemblyName WindowsBase
 
 Import-Module (Join-Path $ScriptRoot 'DiagFramework.psm1') -Force
 
+function Import-UiResources {
+    param([string]$CultureName = 'hu-HU')
+    $candidate = Join-Path $ScriptRoot ("config\ui.$CultureName.json")
+    if (-not (Test-Path $candidate)) { $candidate = Join-Path $ScriptRoot 'config\ui.hu-HU.json' }
+    if (-not (Test-Path $candidate)) {
+        return [PSCustomObject]@{ Controls = [PSCustomObject]@{}; Messages = [PSCustomObject]@{}; Window = [PSCustomObject]@{} }
+    }
+    return Get-Content -Path $candidate -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+$script:Ui = Import-UiResources -CultureName $Culture
+
+function Get-UiValue {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter()][string]$Default = ''
+    )
+    $node = $script:Ui
+    foreach ($part in ($Path -split '\.')) {
+        if ($null -eq $node -or -not $node.PSObject.Properties[$part]) { return $Default }
+        $node = $node.$part
+    }
+    if ($null -eq $node) { return $Default }
+    return [string]$node
+}
+
+function Format-UiMessage {
+    param(
+        [Parameter(Mandatory)][string]$Key,
+        [Parameter(Mandatory)][string]$Default,
+        [object[]]$Args = @()
+    )
+    $template = Get-UiValue -Path "Messages.$Key" -Default $Default
+    if ($Args.Count -gt 0) { return [string]::Format($template, $Args) }
+    return $template
+}
+
 [xml]$xaml = Get-Content (Join-Path $ScriptRoot 'MainWindow.xaml') -Raw -Encoding UTF8
 $reader = [System.Xml.XmlNodeReader]::new($xaml)
 $window = [Windows.Markup.XamlReader]::Load($reader)
@@ -79,12 +118,45 @@ $btnReload = $window.FindName('btnReloadModules')
 $btnSearchUpdates = $window.FindName('btnSearchUpdates')
 $btnInstallUpdates = $window.FindName('btnInstallUpdates')
 $btnAiLogPackage = $window.FindName('btnAiLogPackage')
+$btnEvidencePackage = $window.FindName('btnEvidencePackage')
 $btnOpenLogs = $window.FindName('btnOpenLogs')
 $txtTargetKB = $window.FindName('txtTargetKB')
 $txtDaysBack = $window.FindName('txtDaysBack')
+$txtTopHint = $window.FindName('txtTopHint')
 $txtLog = $window.FindName('txtLog')
 $txtStatus = $window.FindName('txtStatus')
+$txtSelectedSummary = $window.FindName('txtSelectedSummary')
+$txtSelectedAction = $window.FindName('txtSelectedAction')
+$txtUsageNotes = $window.FindName('txtUsageNotes')
 $chkWhatIf = $window.FindName('chkWhatIf')
+
+function Set-ControlTextFromUi {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)]$Control
+    )
+    $cfg = $script:Ui.Controls.$Name
+    if ($null -eq $cfg) { return }
+    if ($cfg.PSObject.Properties['Content'] -and $Control.PSObject.Properties['Content']) { $Control.Content = [string]$cfg.Content }
+    if ($cfg.PSObject.Properties['Text'] -and $Control.PSObject.Properties['Text']) { $Control.Text = [string]$cfg.Text }
+    if ($cfg.PSObject.Properties['Header'] -and $Control.PSObject.Properties['Header']) { $Control.Header = [string]$cfg.Header }
+    if ($cfg.PSObject.Properties['ToolTip']) { $Control.ToolTip = [string]$cfg.ToolTip }
+}
+
+function Apply-UiResources {
+    $title = Get-UiValue -Path 'Window.Title' -Default 'DiagFramework'
+    if (-not [string]::IsNullOrWhiteSpace($title)) { $window.Title = $title }
+    $names = @(
+        'btnReloadModules','btnScan','btnRunSelected','btnRollbackSelected','chkWhatIf','btnSearchUpdates','btnInstallUpdates',
+        'lblTargetKB','txtTargetKB','lblDaysBack','txtDaysBack','btnAiLogPackage','btnEvidencePackage','btnOpenLogs','txtTopHint',
+        'grpModules','grpSummary','grpRecommendedAction','grpLog','grpUsageNotes','txtUsageNotes','txtStatus'
+    )
+    foreach ($name in $names) {
+        $control = $window.FindName($name)
+        if ($control) { Set-ControlTextFromUi -Name $name -Control $control }
+    }
+}
+Apply-UiResources
 
 $script:CurrentItems = New-Object System.Collections.ArrayList
 
@@ -99,7 +171,9 @@ function Get-TargetKbFromUi {
     $kb = [string]$txtTargetKB.Text
     if ([string]::IsNullOrWhiteSpace($kb)) { $kb = 'KB5089573' }
     $kb = $kb.Trim().ToUpperInvariant()
-    if ($kb -notmatch '^KB\d{6,}$') { throw "Érvénytelen KB formátum: $kb. Példa: KB5089573" }
+    if ($kb -notmatch '^KB\d{6,}$') {
+        throw (Format-UiMessage -Key 'InvalidKB' -Default 'Érvénytelen KB formátum: {0}. Példa: KB5089573' -Args @($kb))
+    }
     return $kb
 }
 
@@ -109,6 +183,25 @@ function Get-DaysBackFromUi {
     if ($days -lt 1) { $days = 1 }
     if ($days -gt 180) { $days = 180 }
     return $days
+}
+
+function Get-ManifestUiValue {
+    param([object]$Module, [string]$Field, [string]$Fallback = '')
+    if ($Module -and $Module.PSObject.Properties['Ui'] -and $Module.Ui -and $Module.Ui.PSObject.Properties[$Field]) {
+        return [string]$Module.Ui.$Field
+    }
+    return $Fallback
+}
+
+function Update-DetailPanes {
+    $item = $lvResults.SelectedItem
+    if ($null -eq $item) {
+        $txtSelectedSummary.Text = ''
+        $txtSelectedAction.Text = ''
+        return
+    }
+    $txtSelectedSummary.Text = [string]$item.Summary
+    $txtSelectedAction.Text = [string]$item.RecommendedAction
 }
 
 function ConvertTo-ResultItem {
@@ -122,14 +215,17 @@ function ConvertTo-ResultItem {
     if ($null -ne $Result.PSObject.Properties['IssueDetected']) { $issue = [bool]$Result.IssueDetected }
     if ($null -ne $Result.PSObject.Properties['FixAvailable']) { $fixAvailable = [bool]$Result.FixAvailable }
 
+    $summary = if ($Result.PSObject.Properties['Summary']) { [string]$Result.Summary } else { Get-ManifestUiValue -Module $Module -Field 'Summary' -Fallback $Module.Description }
+    $recommended = if ($Result.PSObject.Properties['RecommendedAction']) { [string]$Result.RecommendedAction } else { Get-ManifestUiValue -Module $Module -Field 'RecommendedAction' -Fallback '' }
+
     [PSCustomObject]@{
         Selected          = ($issue -and $fixAvailable)
         ModuleId          = $Module.Id
         Name              = $Module.Name
-        Severity          = if ($Result.PSObject.Properties['Severity']) { [string]$Result.Severity } else { 'Info' }
+        Severity          = if ($Result.PSObject.Properties['Severity']) { [string]$Result.Severity } else { [string]$Module.Risk }
         Status            = if ($issue) { 'Javítás / gyűjtés javasolt' } else { 'Rendben / nincs automatikus javítás' }
-        Summary           = if ($Result.PSObject.Properties['Summary']) { [string]$Result.Summary } else { '' }
-        RecommendedAction = if ($Result.PSObject.Properties['RecommendedAction']) { [string]$Result.RecommendedAction } else { '' }
+        Summary           = $summary
+        RecommendedAction = $recommended
         FixAvailable      = $fixAvailable
         DetailsJson       = ($Result | ConvertTo-Json -Depth 12)
         RawModule         = $Module
@@ -147,8 +243,8 @@ function Refresh-ModuleList {
             Name              = $m.Name
             Severity          = $m.Risk
             Status            = 'Nincs még diagnosztizálva'
-            Summary           = $m.Description
-            RecommendedAction = ''
+            Summary           = Get-ManifestUiValue -Module $m -Field 'Summary' -Fallback $m.Description
+            RecommendedAction = Get-ManifestUiValue -Module $m -Field 'RecommendedAction' -Fallback ''
             FixAvailable      = $false
             DetailsJson       = ''
             RawModule         = $m
@@ -160,6 +256,7 @@ function Refresh-ModuleList {
     $lvResults.ItemsSource = $script:CurrentItems
     $paths = Get-DiagPaths
     $txtStatus.Text = "Betöltött modulok: $($modules.Count) | RunId: $($paths.RunId)"
+    Update-DetailPanes
 }
 
 function Run-Diagnostics {
@@ -168,7 +265,7 @@ function Run-Diagnostics {
     try {
         $targetKb = Get-TargetKbFromUi
         $daysBack = Get-DaysBackFromUi
-        Add-UiLog "Diagnosztika indítása. TargetKB=$targetKb DaysBack=$daysBack"
+        Add-UiLog (Format-UiMessage -Key 'DiagStart' -Default 'Diagnosztika indítása. TargetKB={0} DaysBack={1}' -Args @($targetKb, $daysBack))
         $script:CurrentItems.Clear() | Out-Null
         $modules = Get-RegisteredDiagModules
         foreach ($m in $modules) {
@@ -176,6 +273,7 @@ function Run-Diagnostics {
                 Add-UiLog "Modul futtatása: $($m.Id) / Test-Condition"
                 $params = @{}
                 if ($m.Id -eq 'AILogCollector') { $params = @{ TargetKB = $targetKb; DaysBack = $daysBack } }
+                elseif ($m.Id -eq 'SystemEvidenceCollector') { $params = @{ DaysBack = $daysBack } }
                 $result = Invoke-DiagModuleAction -Module $m -Action 'Test-Condition' -Parameters $params
                 $item = ConvertTo-ResultItem -Module $m -Result $result
                 [void]$script:CurrentItems.Add($item)
@@ -189,7 +287,7 @@ function Run-Diagnostics {
                     Severity          = 'High'
                     Status            = 'Diagnosztikai hiba'
                     Summary           = $_.Exception.Message
-                    RecommendedAction = 'Ellenőrizd a modul scriptjét és a jogosultságokat.'
+                    RecommendedAction = 'Ellenőrizd a modul scriptjét, manifestjét és a jogosultságokat.'
                     FixAvailable      = $false
                     DetailsJson       = ($_ | Out-String)
                     RawModule         = $m
@@ -201,24 +299,26 @@ function Run-Diagnostics {
         }
         $lvResults.ItemsSource = $null
         $lvResults.ItemsSource = $script:CurrentItems
-        $txtStatus.Text = "Diagnosztika kész. Talált javasolt elemek: $(($script:CurrentItems | Where-Object { $_.Selected }).Count)"
+        $count = (($script:CurrentItems | Where-Object { $_.Selected }).Count)
+        $txtStatus.Text = Format-UiMessage -Key 'DiagComplete' -Default 'Diagnosztika kész. Talált javasolt elemek: {0}' -Args @($count)
     }
     finally {
         $btnScan.IsEnabled = $true
         $btnRun.IsEnabled = $true
+        Update-DetailPanes
     }
 }
 
 function Run-SelectedFixes {
     $selected = @($lvResults.ItemsSource | Where-Object { $_.Selected -and $_.FixAvailable })
     if ($selected.Count -eq 0) {
-        [System.Windows.MessageBox]::Show('Nincs kiválasztott, automatikusan javítható/gyűjthető elem.', 'DiagFramework', 'OK', 'Information') | Out-Null
+        [System.Windows.MessageBox]::Show((Format-UiMessage -Key 'NoSelectedFix' -Default 'Nincs kiválasztott, automatikusan javítható/gyűjthető elem.'), 'DiagFramework', 'OK', 'Information') | Out-Null
         return
     }
 
     $mode = if ($chkWhatIf.IsChecked) { 'WhatIf / próba' } else { 'ÉLES javítás vagy LOG gyűjtés' }
-    $question = "Futtassam a kijelölt műveleteket?`n`nMód: $mode`nElemek: $($selected.Count)"
-    $answer = [System.Windows.MessageBox]::Show($question, 'Megerősítés', 'YesNo', 'Warning')
+    $question = Format-UiMessage -Key 'ConfirmRunBody' -Default "Futtassam a kijelölt műveleteket?`n`nMód: {0}`nElemek: {1}" -Args @($mode, $selected.Count)
+    $answer = [System.Windows.MessageBox]::Show($question, (Format-UiMessage -Key 'ConfirmRunTitle' -Default 'Megerősítés'), 'YesNo', 'Warning')
     if ($answer -ne 'Yes') { return }
 
     $btnRun.IsEnabled = $false
@@ -230,9 +330,10 @@ function Run-SelectedFixes {
                 Add-UiLog "Művelet futtatása: $($it.ModuleId) / Invoke-Fix / WhatIf=$($chkWhatIf.IsChecked)"
                 $params = @{}
                 if ($it.ModuleId -eq 'AILogCollector') { $params = @{ TargetKB = $targetKb; DaysBack = $daysBack } }
+                elseif ($it.ModuleId -eq 'SystemEvidenceCollector') { $params = @{ DaysBack = $daysBack } }
                 $res = Invoke-DiagModuleAction -Module $it.RawModule -Action 'Invoke-Fix' -WhatIf:$chkWhatIf.IsChecked -Parameters $params
                 Add-UiLog (($res | ConvertTo-Json -Depth 12))
-                if ($res.PSObject.Properties['ZipPath']) { Add-UiLog "AI LOG ZIP elkészült: $($res.ZipPath)" }
+                if ($res.PSObject.Properties['ZipPath']) { Add-UiLog "ZIP elkészült: $($res.ZipPath)" }
             }
             catch {
                 Add-UiLog "MŰVELETI HIBA $($it.ModuleId): $($_.Exception.Message)"
@@ -248,10 +349,10 @@ function Run-SelectedFixes {
 function Run-SelectedRollback {
     $selected = @($lvResults.ItemsSource | Where-Object { $_.Selected })
     if ($selected.Count -eq 0) {
-        [System.Windows.MessageBox]::Show('Nincs kiválasztott modul rollback művelethez.', 'DiagFramework', 'OK', 'Information') | Out-Null
+        [System.Windows.MessageBox]::Show((Format-UiMessage -Key 'NoSelectedRollback' -Default 'Nincs kiválasztott modul rollback művelethez.'), 'DiagFramework', 'OK', 'Information') | Out-Null
         return
     }
-    $answer = [System.Windows.MessageBox]::Show('Rollback műveletet csak akkor futtass, ha egy javítás után regresszió jelentkezett. Folytatod?', 'Rollback megerősítés', 'YesNo', 'Warning')
+    $answer = [System.Windows.MessageBox]::Show((Format-UiMessage -Key 'ConfirmRollbackBody' -Default 'Rollback műveletet csak akkor futtass, ha egy javítás után regresszió jelentkezett. Folytatod?'), 'Rollback megerősítés', 'YesNo', 'Warning')
     if ($answer -ne 'Yes') { return }
 
     foreach ($it in $selected) {
@@ -306,34 +407,44 @@ function Install-UpdatesWithPSWindowsUpdate {
     }
 }
 
-function New-AiLogPackageFromButton {
-    $btnAiLogPackage.IsEnabled = $false
+function Invoke-CollectorModuleFromButton {
+    param(
+        [Parameter(Mandatory)][string]$ModuleId,
+        [Parameter(Mandatory)][string]$DoneMessageKey,
+        [Parameter(Mandatory)][string]$DefaultDoneMessage,
+        [Parameter(Mandatory)]$Button
+    )
+    $Button.IsEnabled = $false
     try {
         $targetKb = Get-TargetKbFromUi
         $daysBack = Get-DaysBackFromUi
-        $module = Get-RegisteredDiagModules | Where-Object Id -eq 'AILogCollector' | Select-Object -First 1
-        if (-not $module) { throw 'Az AILogCollector modul nem található.' }
-        Add-UiLog "AI LOG csomag készítése: TargetKB=$targetKb DaysBack=$daysBack"
-        $res = Invoke-DiagModuleAction -Module $module -Action 'Invoke-Fix' -Parameters @{ TargetKB = $targetKb; DaysBack = $daysBack }
+        $module = Get-RegisteredDiagModules | Where-Object Id -eq $ModuleId | Select-Object -First 1
+        if (-not $module) { throw "A $ModuleId modul nem található." }
+        $params = if ($ModuleId -eq 'AILogCollector') { @{ TargetKB = $targetKb; DaysBack = $daysBack } } else { @{ DaysBack = $daysBack } }
+        Add-UiLog "$ModuleId csomag készítése: TargetKB=$targetKb DaysBack=$daysBack"
+        $res = Invoke-DiagModuleAction -Module $module -Action 'Invoke-Fix' -Parameters $params
         Add-UiLog (($res | ConvertTo-Json -Depth 12))
         if ($res.PSObject.Properties['ZipPath']) {
-            Add-UiLog "AI LOG ZIP: $($res.ZipPath)"
-            $txtStatus.Text = "AI LOG csomag elkészült: $($res.ZipPath)"
-            [System.Windows.MessageBox]::Show("AI LOG csomag elkészült:`n$($res.ZipPath)", 'DiagFramework', 'OK', 'Information') | Out-Null
+            Add-UiLog "ZIP: $($res.ZipPath)"
+            $txtStatus.Text = "Csomag elkészült: $($res.ZipPath)"
+            [System.Windows.MessageBox]::Show((Format-UiMessage -Key $DoneMessageKey -Default $DefaultDoneMessage -Args @($res.ZipPath)), 'DiagFramework', 'OK', 'Information') | Out-Null
         }
     }
     catch {
-        Add-UiLog "AI LOG csomag hiba: $($_.Exception.Message)"
-        [System.Windows.MessageBox]::Show($_.Exception.Message, 'AI LOG csomag hiba', 'OK', 'Error') | Out-Null
+        Add-UiLog "$ModuleId csomag hiba: $($_.Exception.Message)"
+        [System.Windows.MessageBox]::Show($_.Exception.Message, "$ModuleId csomag hiba", 'OK', 'Error') | Out-Null
     }
     finally {
-        $btnAiLogPackage.IsEnabled = $true
+        $Button.IsEnabled = $true
     }
 }
 
 function Open-LogsFolder {
     $paths = Get-DiagPaths
-    if (-not (Test-Path $paths.LogPath)) { New-Item -Path $paths.LogPath -ItemType Directory -Force | Out-Null }
+    if (-not (Test-Path $paths.LogPath)) {
+        New-Item -Path $paths.LogPath -ItemType Directory -Force | Out-Null
+        Add-UiLog (Format-UiMessage -Key 'OpenLogsMissingCreated' -Default 'A logs mappa nem létezett, ezért létrehoztam.')
+    }
     Start-Process explorer.exe -ArgumentList ('"{0}"' -f $paths.LogPath) | Out-Null
 }
 
@@ -343,9 +454,11 @@ $btnRun.Add_Click({ Run-SelectedFixes })
 $btnRollback.Add_Click({ Run-SelectedRollback })
 $btnSearchUpdates.Add_Click({ Search-UpdatesWithPSWindowsUpdate })
 $btnInstallUpdates.Add_Click({ Install-UpdatesWithPSWindowsUpdate })
-$btnAiLogPackage.Add_Click({ New-AiLogPackageFromButton })
+$btnAiLogPackage.Add_Click({ Invoke-CollectorModuleFromButton -ModuleId 'AILogCollector' -DoneMessageKey 'AiLogDone' -DefaultDoneMessage "AI LOG csomag elkészült:`n{0}" -Button $btnAiLogPackage })
+$btnEvidencePackage.Add_Click({ Invoke-CollectorModuleFromButton -ModuleId 'SystemEvidenceCollector' -DoneMessageKey 'EvidenceLogDone' -DefaultDoneMessage "Rendszer LOG csomag elkészült:`n{0}" -Button $btnEvidencePackage })
 $btnOpenLogs.Add_Click({ Open-LogsFolder })
+$lvResults.Add_SelectionChanged({ Update-DetailPanes })
 
 Refresh-ModuleList
-Add-UiLog 'DiagFramework Windows Update Repair v1.1 AI Log Pack elindult.'
+Add-UiLog (Format-UiMessage -Key 'Started' -Default 'DiagFramework Windows Update Repair v1.2 Structured AI Log Pack elindult.')
 $window.ShowDialog() | Out-Null

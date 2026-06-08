@@ -5,5 +5,13 @@
   "Author": "DiagFramework",
   "Script": "ComponentStoreRepair.ps1",
   "Risk": "Medium",
-  "Description": "DISM CheckHealth/RestoreHealth és SFC scannow a komponens-store és rendszerfájlhibák javítására."
+  "Description": "DISM CheckHealth/RestoreHealth és SFC scannow a komponens-store és rendszerfájlhibák javítására.",
+  "Category": "Repair",
+  "Ui": {
+    "Summary": "A Windows komponens-store állapotát vizsgálja DISM CheckHealth segítségével, javításkor DISM RestoreHealth és SFC scannow műveletet futtat.",
+    "RecommendedAction": "Komponens-store sérülés vagy CBS/DISM hibák esetén WhatIf után, tudatos jóváhagyással futtasd. Internet vagy megfelelő repair source szükséges lehet.",
+    "ToolTip": "DISM /Online /Cleanup-Image /CheckHealth, RestoreHealth és SFC munkafolyamat.",
+    "ExpectedOutput": "JSONL futási log + DISM/SFC parancskimenet.",
+    "Impact": "Medium: rendszerjavító művelet, hosszú futás és újraindítási igény előfordulhat."
+  }
 }

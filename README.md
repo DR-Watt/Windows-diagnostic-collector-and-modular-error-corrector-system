@@ -1,10 +1,89 @@
-# DiagFramework Windows Update Repair MVP v1.1.0 — AI LOG Pack
+# DiagFramework Windows Update Repair MVP v1.2.0 — Structured AI UI & Evidence Pack
 
 ## Cél
 
-PowerShell 7.x + WPF/XAML alapú Windows 11 diagnosztikai és javító keretrendszer, amely a Windows Update telepítési hibáit vizsgálja, opcionális javításokat kínál, és **AI által elemezhető strukturált LOG csomagot** készít.
+PowerShell 7.x + WPF/XAML alapú Windows 11 diagnosztikai és javító keretrendszer, amely:
 
-A v1.1.0 fejlesztés elsődleges célja: olyan bizonyítékcsomag létrehozása, amely egy külső AI vagy szakértő számára is értelmezhető, különösen többszöri rollback és újraindítás után sikertelenül települő kumulatív frissítéseknél, például: `KB5089573`.
+- Windows Update telepítési hibákat vizsgál,
+- opcionális javításokat kínál felhasználói jóváhagyással,
+- célzott KB-frissítésekhez AI által elemezhető LOG csomagot készít,
+- általános boot/setup/driver/crash/vendor diagnosztikai bizonyítékcsomagot készít,
+- a GUI feliratait, tooltipjeit és fő üzeneteit külön strukturált JSON fájlban tartja,
+- a modulok magyarázó szövegeit a modul saját `manifest.json` fájljában tárolja.
+
+## v1.2.0 fő változások
+
+### 1. Strukturált UI erőforrásfájl
+
+Új fájl:
+
+```text
+config\ui.hu-HU.json
+```
+
+Ez tartalmazza:
+
+- ablakcímet,
+- gombfeliratokat,
+- címkéket,
+- tooltip szövegeket,
+- fő üzeneteket,
+- használati megjegyzést.
+
+### 2. Manifest-vezérelt modulmagyarázatok
+
+Minden modul manifestje tartalmazza az új `Ui` blokkot:
+
+```json
+{
+  "Ui": {
+    "Summary": "...",
+    "RecommendedAction": "...",
+    "ToolTip": "...",
+    "ExpectedOutput": "...",
+    "Impact": "..."
+  }
+}
+```
+
+A GUI ezeket használja az ÖSSZEFOGLALÓ és JAVASOLT MŰVELET panel feltöltéséhez.
+
+### 3. GUI elrendezés módosítása
+
+A modulok listája külön bal oldali táblában jelenik meg. Az ÖSSZEFOGLALÓ és JAVASOLT MŰVELET nem hosszú GridView oszlopként szerepel, hanem két külön, függőlegesen görgethető jobb oldali panelben.
+
+Ez hosszabb magyarázó szövegeknél kezelhetőbb.
+
+### 4. Új SystemEvidenceCollector modul
+
+Új modul:
+
+```text
+modules\SystemEvidenceCollector\SystemEvidenceCollector.ps1
+```
+
+Feladata:
+
+- System/Application/Setup eseménynaplók gyűjtése,
+- WindowsUpdateClient események gyűjtése,
+- Kernel-Boot, Kernel-PnP, DeviceSetupManager, DriverFrameworks események gyűjtése,
+- CBS/DISM/Panther/SetupAPI/WER/Minidump adatok másolása,
+- ismert gyártói diagnosztikai loghelyek gyűjtése: Dell, HP, Lenovo, Intel, NVIDIA, AMD,
+- driver snapshot mentése,
+- pending reboot registry állapot mentése,
+- `ai_summary.json`, `manifest.json`, `AI_README.md` és ZIP csomag készítése.
+
+A modul nem javít rendszert.
+
+### 5. Markdown CLEAN generálási log
+
+A CLEAN kódgenerálási log a továbbiakban Markdown formátumú:
+
+```text
+clean_generation_log.md
+```
+
+Ez egyben build log és fejlesztői changelog.
 
 ## Követelmények
 
@@ -12,29 +91,29 @@ A v1.1.0 fejlesztés elsődleges célja: olyan bizonyítékcsomag létrehozása,
 - PowerShell 7.x (`pwsh.exe`)
 - Admin jogosultság
 - WPF futtatási környezet Windows alatt
-- Execution Policy: `RemoteSigned` vagy a mellékelt indítón keresztül `Bypass`
+- Execution Policy: `RemoteSigned`, vagy a mellékelt `.bat` indítón keresztül `Bypass`
 
 ## Indítás GUI-val
 
 ```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_1_0_ai_logs
+Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
 .\install_and_run.bat
 ```
 
 Vagy közvetlenül:
 
 ```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_1_0_ai_logs
+Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
 .\diagnostics\Initialize-DiagEnvironment.ps1
 .\Launcher.ps1
 ```
 
-## Gyors célzott AI LOG gyűjtés KB5089573-hoz
+## Célzott AI LOG gyűjtés KB5089573-hoz
 
 Admin PowerShell 7-ből:
 
 ```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_1_0_ai_logs
+Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
 .\tools\Collect-AIPackage.ps1 -TargetKB KB5089573 -DaysBack 30
 ```
 
@@ -44,151 +123,68 @@ Vagy:
 collect_ai_logs_for_kb5089573.bat
 ```
 
-A csomag helye:
+Csomag helye:
 
 ```text
 logs\ai_packages\YYYYMMDD-HHMMSS-COMPUTER-KB5089573.zip
 ```
 
-## Új v1.1.0 funkciók
+## Általános rendszer LOG / evidence csomag
 
-### 1. AI LOG csomag gyűjtő modul
-
-Új modul:
-
-```text
-modules\AILogCollector\AILogCollector.ps1
-```
-
-Feladata:
-
-- célzott KB azonosító kezelése, alapértelmezés: `KB5089573`,
-- Windows Update history gyűjtése COM API alapján,
-- WindowsUpdate ETL logok olvasható `WindowsUpdate.log` formátumba konvertálása,
-- eseménynaplók gyűjtése JSONL formátumban,
-- CBS/DISM/Panther/MoSetup/ReportingEvents logok másolása,
-- registry reboot/pending állapotok gyűjtése,
-- DISM CheckHealth és csomaglista mentése,
-- hibakódok (`0x........`) kinyerése,
-- `ai_summary.json` létrehozása,
-- ZIP csomag készítése.
-
-### 2. GUI bővítés
-
-Új mezők és gombok:
-
-- `Célzott KB` mező, alapértelmezés: `KB5089573`,
-- `Napok` mező, alapértelmezés: `30`,
-- `AI LOG csomag készítése` gomb,
-- `Logs mappa` gomb.
-
-Az AI LOG csomag készítése **nem javít rendszert**, csak diagnosztikai adatokat gyűjt és tömörít.
-
-### 3. Strukturált JSONL naplózás
-
-A core naplózás bővült:
-
-```text
-logs\jsonl\diag-YYYYMMDD.jsonl
-```
-
-Minden logbejegyzés tartalmazza:
-
-- `SchemaVersion`,
-- `TimestampUtc`,
-- `TimestampLocal`,
-- `RunId`,
-- `CorrelationId`,
-- `Severity`,
-- `Computer`,
-- `User`,
-- `Module`,
-- `Action`,
-- `Host`,
-- `Data`.
-
-### 4. AI csomag szerkezete
-
-Példa:
-
-```text
-ai_summary.json
-manifest.json
-AI_README.md
-meta\system-info.json
-updates\update-history.json
-updates\target-KB5089573-history.json
-updates\get-hotfix.json
-updates\get-windowsupdatelog-result.json
-events\event-summary.json
-events\*.jsonl
-registry\reboot-pending.json
-commands\native-command-results.json
-copied_logs\CBS.log
-copied_logs\dism.log
-copied_logs\WindowsUpdate.log
-copied_logs\ReportingEvents.log
-etl_metadata\etl-files.json
-errors\error-codes.json
-```
-
-## Célzott KB5089573 elemzési irány
-
-A KB5089573 a Microsoft dokumentáció szerint 2026. május 26-i preview cumulative update Windows 11 25H2 és 24H2 rendszerekhez, OS build: `26200.8524` és `26100.8524`.
-
-Többszöri rollback és újraindítás után az első lépés nem agresszív reset, hanem bizonyítékgyűjtés:
-
-1. AI LOG csomag készítése.
-2. `ai_summary.json` ellenőrzése.
-3. `updates\target-KB5089573-history.json` HResult és ResultText mezőinek vizsgálata.
-4. `events\event-summary.json` alapján érintett log kiválasztása.
-5. `errors\error-codes.json` alapján hibakód-csoportosítás.
-6. `copied_logs\CBS.log`, `dism.log`, `WindowsUpdate.log`, Panther/MoSetup logok összevetése.
-7. Csak ezután cache reset, DISM/SFC vagy célzott javítás.
-
-## AI csomag validálása
+Admin PowerShell 7-ből:
 
 ```powershell
-.\validators\Validate-AIPackage.ps1 -PackagePath .\logs\ai_packages\<csomag>.zip
+Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
+.\tools\Collect-SystemEvidence.ps1 -DaysBack 30
 ```
 
-## Biztonsági megjegyzés
+Vagy:
 
-Az AI LOG csomag tartalmazhat:
+```bat
+collect_system_evidence.bat
+```
 
-- gépnevet,
-- felhasználónevet,
-- telepítési útvonalakat,
-- event log üzeneteket,
-- update history adatokat,
-- registry policy részleteket.
+Csomag helye:
 
-Külső AI-nak vagy harmadik félnek küldés előtt szükség esetén anonimizáld.
+```text
+logs\evidence_packages\YYYYMMDD-HHMMSS-COMPUTER-SystemEvidence.zip
+```
 
-## Modulok
+## Validátorok
 
-- `AILogCollector` — AI LOG csomag gyűjtés, nem javít.
-- `WUServiceHealth` — Windows Update szolgáltatások ellenőrzése/javítása.
-- `WUCacheReset` — SoftwareDistribution/catroot2 rollback-barát átnevezése.
-- `ComponentStoreRepair` — DISM/SFC javítás.
-- `PSWindowsUpdateManager` — PSWindowsUpdate integráció.
+Manifest validáció:
 
-## Validációs sorrend
+```powershell
+.\validators\Validate-Manifests.ps1
+```
 
-1. `diagnostics\Initialize-DiagEnvironment.ps1`
-2. `validators\Validate-Manifests.ps1`
-3. `Launcher.ps1` vagy `tools\Collect-AIPackage.ps1`
-4. AI csomag készülése után: `validators\Validate-AIPackage.ps1`
+UI resource validáció:
 
+```powershell
+.\validators\Validate-UiResources.ps1
+```
 
+AI LOG csomag validáció:
 
-## v1.1.1 AI LOG Collector hotfix
+```powershell
+.\validators\Validate-AIPackage.ps1 -PackagePath .\logs\ai_packages\<package>.zip
+```
 
-Javítások:
+## Biztonsági alapelv
 
-- `AILogCollector.ps1: Argument types do not match` hiba javítása platformbiztos relatívútvonal-képzéssel.
-- `.TrimStart('\')` típusérzékeny művelet kiváltása `[System.IO.Path]::GetRelativePath()` alapú megoldással.
-- Windows eseménynapló objektumok egyszerűsítése AI-barát, sekély JSON/JSONL struktúrára.
-- `ConvertTo-Json` mélységi figyelmeztetések csökkentése/szüntetése `-WarningAction SilentlyContinue` és laposított objektumok használatával.
-- `collector-progress.jsonl` és `collector-errors.json` fájlok létrehozása, hogy részleges gyűjtés esetén is látható legyen, melyik fázis bukott el.
-- A LOG csomag részleges hiba esetén is ZIP-be kerül, ha a package könyvtár létrejött. Ilyenkor a visszatérési eredmény: `CompletedWithWarnings`.
+- A LOG gyűjtő modulok nem javítanak rendszert.
+- A Windows Update cache reset törlés helyett átnevezést használ.
+- Javító műveleteket először WhatIf módban célszerű futtatni.
+- DISM/SFC hosszú ideig futhat, és újraindítást igényelhet.
+
+## GitHub inputok
+
+A v1.2.0 átdolgozás tervezésénél figyelembe vett GitHub repók:
+
+- `DR-Watt/Windows-diagnostic-collector-and-modular-error-corrector-system`
+- `DR-Watt/WindowsRescue`
+- `DR-Watt/Windows-Repair-Tool`
+- `DR-Watt/Windows-Maintenance-Tool`
+- `DR-Watt/WindowsMaintenance`
+
+A külső repók nem lettek egy az egyben átmásolva; tervezési mintaként használtam őket: biztonságos mentés, interaktív javítás, DISM/SFC sorrend, GUI tooltip/preview szemlélet, opcionális agresszív műveletek.

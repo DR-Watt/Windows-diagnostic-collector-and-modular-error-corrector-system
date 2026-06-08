@@ -5,5 +5,13 @@
   "Author": "DiagTeam",
   "Script": "AILogCollector.ps1",
   "Risk": "Low",
-  "Description": "Célzott Windows Update / KB hibaelemző LOG csomagot készít AI vagy külső szakértő számára. v1.1.1: JSON-truncation és útvonal-típushiba hotfix. Nem javít rendszert."
+  "Description": "Célzott Windows Update / KB hibaelemző LOG csomagot készít AI vagy külső szakértő számára. v1.1.1: JSON-truncation és útvonal-típushiba hotfix. Nem javít rendszert.",
+  "Category": "EvidenceCollection",
+  "Ui": {
+    "Summary": "Célzott Windows Update / KB hibaelemző bizonyítékcsomagot készít. Elsősorban kumulatív frissítések rollback vagy sikertelen telepítésének vizsgálatára való.",
+    "RecommendedAction": "Rollback vagy ismételt újraindítás után sikertelen KB esetén először ezt futtasd. A modul nem javít rendszert, csak AI/szakértő által elemezhető ZIP-et készít.",
+    "ToolTip": "Windows Update, CBS, DISM, Panther, eseménynapló, registry és update history adatok gyűjtése célzott KB-hoz.",
+    "ExpectedOutput": "logs/ai_packages/<timestamp>-<computer>-<KB>.zip",
+    "Impact": "Low: olvasási/gyűjtési művelet, rendszerjavítást nem végez."
+  }
 }

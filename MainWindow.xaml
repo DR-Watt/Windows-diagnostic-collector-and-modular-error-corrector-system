@@ -1,7 +1,7 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Windows 11 Update Repair - DiagFramework v1.1 AI Log Pack"
-        Height="760" Width="1220" MinHeight="700" MinWidth="1080"
+        Title="DiagFramework"
+        Height="820" Width="1320" MinHeight="760" MinWidth="1180"
         WindowStartupLocation="CenterScreen">
   <Grid Margin="12">
     <Grid.RowDefinitions>
@@ -14,76 +14,84 @@
 
     <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,8">
       <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-        <Button Name="btnReloadModules" Width="120" Height="32" Margin="0,0,8,0">Modulok</Button>
-        <Button Name="btnScan" Width="170" Height="32" Margin="0,0,8,0">Diagnosztika indítása</Button>
-        <Button Name="btnRunSelected" Width="210" Height="32" Margin="0,0,8,0">Kiválasztott javítások</Button>
-        <Button Name="btnRollbackSelected" Width="170" Height="32" Margin="0,0,8,0">Rollback</Button>
-        <CheckBox Name="chkWhatIf" VerticalAlignment="Center" Margin="10,0,16,0" IsChecked="True">WhatIf próba mód</CheckBox>
+        <Button Name="btnReloadModules" Width="120" Height="32" Margin="0,0,8,0"/>
+        <Button Name="btnScan" Width="170" Height="32" Margin="0,0,8,0"/>
+        <Button Name="btnRunSelected" Width="210" Height="32" Margin="0,0,8,0"/>
+        <Button Name="btnRollbackSelected" Width="170" Height="32" Margin="0,0,8,0"/>
+        <CheckBox Name="chkWhatIf" VerticalAlignment="Center" Margin="10,0,16,0" IsChecked="True"/>
       </StackPanel>
       <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
-        <Button Name="btnSearchUpdates" Width="170" Height="32" Margin="0,0,8,0">Frissítések keresése</Button>
-        <Button Name="btnInstallUpdates" Width="190" Height="32">Frissítések telepítése</Button>
+        <Button Name="btnSearchUpdates" Width="170" Height="32" Margin="0,0,8,0"/>
+        <Button Name="btnInstallUpdates" Width="190" Height="32"/>
       </StackPanel>
     </DockPanel>
 
     <Border Grid.Row="1" BorderThickness="1" BorderBrush="#CCCCCC" Padding="8" Margin="0,0,0,10">
       <DockPanel LastChildFill="False">
         <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
-          <TextBlock Text="Célzott KB:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <TextBlock Name="lblTargetKB" VerticalAlignment="Center" Margin="0,0,6,0"/>
           <TextBox Name="txtTargetKB" Width="120" Height="26" Text="KB5089573" Margin="0,0,16,0"/>
-          <TextBlock Text="Napok:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+          <TextBlock Name="lblDaysBack" VerticalAlignment="Center" Margin="0,0,6,0"/>
           <TextBox Name="txtDaysBack" Width="55" Height="26" Text="30" Margin="0,0,16,0"/>
-          <Button Name="btnAiLogPackage" Width="220" Height="32" Margin="0,0,8,0">AI LOG csomag készítése</Button>
-          <Button Name="btnOpenLogs" Width="130" Height="32">Logs mappa</Button>
+          <Button Name="btnAiLogPackage" Width="220" Height="32" Margin="0,0,8,0"/>
+          <Button Name="btnEvidencePackage" Width="235" Height="32" Margin="0,0,8,0"/>
+          <Button Name="btnOpenLogs" Width="130" Height="32"/>
         </StackPanel>
-        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" TextWrapping="Wrap" Width="420">
-          A LOG csomag nem javít rendszert: ETL/WindowsUpdate.log, CBS, DISM, Panther, eseménynaplók, registry reboot/pending állapotok és update history kerülnek strukturált ZIP-be.
-        </TextBlock>
+        <TextBlock Name="txtTopHint" DockPanel.Dock="Right" VerticalAlignment="Center" TextWrapping="Wrap" Width="360"/>
       </DockPanel>
     </Border>
 
-    <ListView Name="lvResults" Grid.Row="2" SelectionMode="Extended">
-      <ListView.View>
-        <GridView>
-          <GridViewColumn Header="Választ" Width="70">
-            <GridViewColumn.CellTemplate>
-              <DataTemplate>
-                <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center"/>
-              </DataTemplate>
-            </GridViewColumn.CellTemplate>
-          </GridViewColumn>
-          <GridViewColumn Header="Modul" DisplayMemberBinding="{Binding Name}" Width="230"/>
-          <GridViewColumn Header="Súly" DisplayMemberBinding="{Binding Severity}" Width="80"/>
-          <GridViewColumn Header="Állapot" DisplayMemberBinding="{Binding Status}" Width="190"/>
-          <GridViewColumn Header="Összefoglaló" DisplayMemberBinding="{Binding Summary}" Width="360"/>
-          <GridViewColumn Header="Javasolt művelet" DisplayMemberBinding="{Binding RecommendedAction}" Width="360"/>
-        </GridView>
-      </ListView.View>
-    </ListView>
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="3*"/>
+        <ColumnDefinition Width="2*"/>
+        <ColumnDefinition Width="2*"/>
+      </Grid.ColumnDefinitions>
+
+      <GroupBox Name="grpModules" Grid.Column="0" Margin="0,0,8,0">
+        <ListView Name="lvResults" SelectionMode="Extended">
+          <ListView.View>
+            <GridView>
+              <GridViewColumn Header="Választ" Width="70">
+                <GridViewColumn.CellTemplate>
+                  <DataTemplate>
+                    <CheckBox IsChecked="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center"/>
+                  </DataTemplate>
+                </GridViewColumn.CellTemplate>
+              </GridViewColumn>
+              <GridViewColumn Header="Modul" DisplayMemberBinding="{Binding Name}" Width="260"/>
+              <GridViewColumn Header="Súly" DisplayMemberBinding="{Binding Severity}" Width="80"/>
+              <GridViewColumn Header="Állapot" DisplayMemberBinding="{Binding Status}" Width="220"/>
+            </GridView>
+          </ListView.View>
+        </ListView>
+      </GroupBox>
+
+      <GroupBox Name="grpSummary" Grid.Column="1" Margin="0,0,8,0">
+        <TextBox Name="txtSelectedSummary" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8"/>
+      </GroupBox>
+
+      <GroupBox Name="grpRecommendedAction" Grid.Column="2">
+        <TextBox Name="txtSelectedAction" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="8"/>
+      </GroupBox>
+    </Grid>
 
     <Grid Grid.Row="3" Margin="0,10,0,0">
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="2*"/>
         <ColumnDefinition Width="*"/>
       </Grid.ColumnDefinitions>
-      <GroupBox Header="Napló" Grid.Column="0" Margin="0,0,8,0">
+      <GroupBox Name="grpLog" Grid.Column="0" Margin="0,0,8,0">
         <TextBox Name="txtLog" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12"/>
       </GroupBox>
-      <GroupBox Header="Használati megjegyzés" Grid.Column="1">
-        <TextBlock TextWrapping="Wrap" Margin="8">
-          1. Futtasd a diagnosztikát.&#x0a;
-          2. Hagyd bekapcsolva a WhatIf módot az első javítási próbakörben.&#x0a;
-          3. A KB5089573 típusú rollback hibánál először készíts AI LOG csomagot.&#x0a;
-          4. A LOG csomag létrehozása nem futtat javítást, de admin jogosultsággal több naplót tud gyűjteni.&#x0a;
-          5. Windows Update cache esetén a mappák átnevezésre kerülnek, nem törlésre.&#x0a;
-          6. DISM/SFC hosszú ideig futhat; közben ne zárd be az ablakot.
-        </TextBlock>
+      <GroupBox Name="grpUsageNotes" Grid.Column="1">
+        <TextBlock Name="txtUsageNotes" TextWrapping="Wrap" Margin="8"/>
       </GroupBox>
     </Grid>
 
     <StatusBar Grid.Row="4" Margin="0,8,0,0">
       <StatusBarItem>
-        <TextBlock Name="txtStatus">Készen áll.</TextBlock>
+        <TextBlock Name="txtStatus"/>
       </StatusBarItem>
     </StatusBar>
   </Grid>

@@ -5,5 +5,13 @@
   "Author": "DiagFramework",
   "Script": "WUServiceHealth.ps1",
   "Risk": "Low",
-  "Description": "Ellenőrzi és javítja a Windows Update, BITS és Cryptographic Services állapotát."
+  "Description": "Ellenőrzi és javítja a Windows Update, BITS és Cryptographic Services állapotát.",
+  "Category": "Diagnostics",
+  "Ui": {
+    "Summary": "A Windows Update alap szolgáltatásainak állapotát és indítási módját vizsgálja: wuauserv, bits, cryptsvc.",
+    "RecommendedAction": "Ha szolgáltatás letiltott vagy nem indítható, engedélyezd a javítást. Ez alapfeltétele a Windows Update működésének.",
+    "ToolTip": "Windows Update szolgáltatás-health check és alap indítási mód visszaállítás.",
+    "ExpectedOutput": "Szolgáltatás-státusz JSONL log és rollback state.",
+    "Impact": "Low-Medium: szolgáltatás indítási módokat módosíthat javításkor."
+  }
 }

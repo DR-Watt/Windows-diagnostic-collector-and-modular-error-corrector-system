@@ -68,6 +68,17 @@ if ([int]$validationSummary.Failed -gt 0) {
     throw "Manifest validációs hiba. Hibás manifestek száma: $($validationSummary.Failed)"
 }
 
+
+Write-EnvLog 'UI resource validátor futtatása.'
+$uiValidator = Join-Path $RootPath 'validators\Validate-UiResources.ps1'
+$uiValidationOutput = @(& $uiValidator -RootPath $RootPath -Culture 'hu-HU' 2>&1)
+$uiValidationSucceeded = $?
+$uiValidationOutput | Tee-Object -FilePath $logFile -Append
+if (-not $uiValidationSucceeded) { throw 'UI resource validátor futási hiba.' }
+try { $uiValidationSummary = ($uiValidationOutput | Out-String | ConvertFrom-Json -ErrorAction Stop) }
+catch { throw "UI resource validátor kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)" }
+if (-not [bool]$uiValidationSummary.Valid) { throw "UI resource validációs hiba. Hibák száma: $($uiValidationSummary.ErrorCount)" }
+
 if ($InstallPSWindowsUpdate) {
     Write-EnvLog 'PSWindowsUpdate telepítés/frissítés indítása.'
     if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {

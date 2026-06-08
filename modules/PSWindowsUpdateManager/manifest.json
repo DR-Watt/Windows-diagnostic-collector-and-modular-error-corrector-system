@@ -5,5 +5,13 @@
   "Author": "DiagFramework",
   "Script": "PSWindowsUpdateManager.ps1",
   "Risk": "Medium",
-  "Description": "Ellenőrzi/telepíti a PSWindowsUpdate modult, majd a GUI-ból frissítéskeresés és telepítés indítható."
+  "Description": "Ellenőrzi/telepíti a PSWindowsUpdate modult, majd a GUI-ból frissítéskeresés és telepítés indítható.",
+  "Category": "UpdateManagement",
+  "Ui": {
+    "Summary": "A PSWindowsUpdate modul meglétét és használhatóságát kezeli Windows Update kereséshez és telepítéshez.",
+    "RecommendedAction": "Frissítéskeresés/telepítés előtt ellenőrizd a modult. Harmadik féltől származó PowerShell Gallery modul, ezért kontrollált környezetben használd.",
+    "ToolTip": "PSWindowsUpdate telepítés/import ellenőrzés, majd frissítéskeresés és telepítés támogatása.",
+    "ExpectedOutput": "Modultelepítési/import log és update query eredmény.",
+    "Impact": "Medium: modultelepítés és Windows Update API-hívások történhetnek."
+  }
 }
