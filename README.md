@@ -1,10 +1,10 @@
-# DiagFramework Windows Update Repair MVP v1.2.7 — System Evidence Resilience & UI Detail Pack
+# DiagFramework Windows Update Repair MVP v1.2.8 — Empty Array & UI Linebreak Hotfix
 
 ## Cél
 
-PowerShell 7.x + WPF/XAML alapú Windows 11 diagnosztikai és javító keretrendszer. A v1.2.7 célja, hogy a rendszer LOG csomag akkor is elemezhető maradjon, ha egyes adatforrások — például registry pending reboot, driver snapshot vagy eseménynapló — futás közben hibát adnak.
+PowerShell 7.x + WPF/XAML alapú Windows 11 diagnosztikai és javító keretrendszer. A v1.2.8 célja, hogy a rendszer LOG csomag akkor is elemezhető maradjon, ha egyes adatforrások — például registry pending reboot, driver snapshot vagy eseménynapló — futás közben hibát adnak.
 
-## Fő változások v1.2.7-ben
+## Fő változások v1.2.8-ben
 
 - `SystemEvidenceCollector.ps1` runtime resilience hotfix.
 - `SystemEvidenceCollector` verzió: `1.2.7`.
@@ -36,7 +36,8 @@ ai_summary.json
 collector-progress.jsonl
 errors\collector-errors.json
 events\event-summary.json
-registryeboot-pending.json
+registry
+eboot-pending.json
 drivers\pnp-signed-drivers.json
 copied_logs\copied-files.json
 commands
@@ -55,4 +56,23 @@ manifest.json
 
 ## Korlát
 
-A csomagot a build környezetben nem tudtam Windows 11 PowerShell 7.6.2 runtime alatt futtatni. A kliensen a környezeti validáció már lefutott; a v1.2.7 fő célja a `SystemEvidenceCollector` futásidejű hibatűrésének javítása.
+A csomagot a build környezetben nem tudtam Windows 11 PowerShell 7.6.2 runtime alatt futtatni. A kliensen a környezeti validáció már lefutott; a v1.2.8 fő célja a `SystemEvidenceCollector` futásidejű hibatűrésének javítása.
+
+
+## v1.2.8 hotfix
+
+### Javítások
+
+- A `SystemEvidenceCollector` üres hibalista (`@()`) esetén nem áll meg többé a `CurrentErrors` paraméter kötési hibájával.
+- Az érintett gyűjtő helper függvények `AllowEmptyCollection` támogatást kaptak.
+- A GUI most a `TargetKB` értéket a `SystemEvidenceCollector` modulnak is átadja.
+- Az ÖSSZEFOGLALÓ és JAVASOLT MŰVELET panelek több soros, számozott lépésekkel tagolt szöveget kapnak.
+- A `Launcher.ps1` régebbi egy soros manifest szövegek esetén is új sorba tördeli a `1)`, `2)`, `3)` lépéseket.
+
+### Tesztelendő parancs
+
+```powershell
+Set-Location C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
+.\diagnostics\Initialize-DiagEnvironment.ps1
+.	ools\Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573
+```

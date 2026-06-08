@@ -5,9 +5,9 @@
 .DESCRIPTION
   Nem javít rendszert. Strukturált, AI által elemezhető ZIP csomagot készít
   boot, setup, driver, update, crash és ismert gyártói diagnosztikai nyomokból.
-  v1.2.7: runtime resilience hotfix. A gyűjtő lépések natív PowerShell tömböket
-  és laposított objektumokat használnak, a fő gyűjtés végzetes alhibák esetén is
-  részleges csomagot, AI_README-t, ai_summary.json-t és collector-errors.json-t készít.
+  v1.2.8: empty-array binding hotfix. A gyűjtő lépések explicit üres
+  tömb támogatást kaptak, ezért a legelső hiba esetén is létrejön a részleges
+  csomag, AI_README, ai_summary.json és collector-errors.json.
 #>
 [CmdletBinding()]
 param(
@@ -23,7 +23,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ModuleId = 'SystemEvidenceCollector'
-$ModuleVersion = '1.2.7'
+$ModuleVersion = '1.2.8'
 
 function Get-Metadata {
     [PSCustomObject]@{
@@ -143,14 +143,18 @@ function Add-ProgressEvent {
 
 function Add-CollectorError {
     param(
-        [Parameter(Mandatory)][object[]]$CurrentErrors,
+        [AllowNull()][AllowEmptyCollection()][object[]]$CurrentErrors = @(),
         [Parameter(Mandatory)][string]$Step,
         [Parameter(Mandatory)][string]$Error,
-        [string]$Target = '',
-        [string]$Category = '',
-        [string]$ScriptStackTrace = ''
+        [AllowEmptyString()][string]$Target = '',
+        [AllowEmptyString()][string]$Category = '',
+        [AllowEmptyString()][string]$ScriptStackTrace = ''
     )
-    $CurrentErrors + [PSCustomObject]@{
+
+    $existing = @()
+    if ($null -ne $CurrentErrors) { $existing = @($CurrentErrors) }
+
+    return @($existing + [PSCustomObject]@{
         SchemaVersion = 'diagframework.collector.error.v1'
         TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
         Step = $Step
@@ -158,13 +162,13 @@ function Add-CollectorError {
         Category = $Category
         Error = $Error
         ScriptStackTrace = $ScriptStackTrace
-    }
+    })
 }
 
 function Write-CollectorErrorsSafe {
     param(
         [Parameter(Mandatory)][string]$PackageRoot,
-        [Parameter(Mandatory)][object[]]$Errors
+        [Parameter()][AllowNull()][AllowEmptyCollection()][object[]]$Errors = @()
     )
     Write-JsonSafe -InputObject @($Errors) -Path (Join-Path $PackageRoot 'errors/collector-errors.json') -Depth 8
 }
@@ -451,7 +455,7 @@ function Collect-Events {
     param(
         [Parameter(Mandatory)][string]$PackageRoot,
         [Parameter(Mandatory)][datetime]$StartTime,
-        [Parameter(Mandatory)][object[]]$Errors,
+        [Parameter()][AllowNull()][AllowEmptyCollection()][object[]]$Errors = @(),
         [int]$MaxEvents = 1200
     )
     $eventRoot = Join-Path $PackageRoot 'events'
@@ -470,7 +474,7 @@ function Collect-Events {
         'Microsoft-Windows-WER-SystemErrorReporting/Operational'
     )
     $summary = @()
-    $localErrors = @($Errors)
+    $localErrors = if ($null -ne $Errors) { @($Errors) } else { @() }
     foreach ($log in $logs) {
         $safe = ($log -replace '[\\/\:\*\?"\<\>\|]', '_')
         $outPath = Join-Path $eventRoot ($safe + '.jsonl')
@@ -542,7 +546,7 @@ function Invoke-CollectorStep {
         [Parameter(Mandatory)][string]$Step,
         [Parameter(Mandatory)][string]$PackageRoot,
         [Parameter(Mandatory)][scriptblock]$ScriptBlock,
-        [Parameter(Mandatory)][object[]]$Errors
+        [Parameter()][AllowNull()][AllowEmptyCollection()][object[]]$Errors = @()
     )
     try {
         $result = & $ScriptBlock
@@ -564,10 +568,10 @@ function New-SummaryObject {
         [string]$TargetKB,
         [int]$DaysBack,
         [int]$MaxEvents,
-        [object[]]$EventSummary,
-        [object[]]$Copied,
-        [object[]]$NativeResults,
-        [object[]]$Errors,
+        [AllowNull()][AllowEmptyCollection()][object[]]$EventSummary = @(),
+        [AllowNull()][AllowEmptyCollection()][object[]]$Copied = @(),
+        [AllowNull()][AllowEmptyCollection()][object[]]$NativeResults = @(),
+        [AllowNull()][AllowEmptyCollection()][object[]]$Errors = @(),
         [string]$FatalError = ''
     )
     [PSCustomObject]@{
@@ -637,26 +641,26 @@ function Invoke-EvidenceCollection {
             Write-JsonSafe -InputObject $obj -Path (Join-Path $packageRoot 'meta/system-info.json') -Depth 8
             $obj
         }
-        $errors = @($step.Errors)
+        $errors = if ($null -ne $step.Errors) { @($step.Errors) } else { @() }
 
         $step = Invoke-CollectorStep -Step 'RegistryPendingReboot' -PackageRoot $packageRoot -Errors $errors -ScriptBlock {
             $obj = @(Get-RebootPendingSnapshot)
             Write-JsonSafe -InputObject $obj -Path (Join-Path $packageRoot 'registry/reboot-pending.json') -Depth 10
             $obj
         }
-        $errors = @($step.Errors)
+        $errors = if ($null -ne $step.Errors) { @($step.Errors) } else { @() }
 
         $step = Invoke-CollectorStep -Step 'DriverSnapshot' -PackageRoot $packageRoot -Errors $errors -ScriptBlock {
             $obj = @(Get-DriverSnapshot)
             Write-JsonSafe -InputObject $obj -Path (Join-Path $packageRoot 'drivers/pnp-signed-drivers.json') -Depth 8
             $obj
         }
-        $errors = @($step.Errors)
+        $errors = if ($null -ne $step.Errors) { @($step.Errors) } else { @() }
 
         try {
             $eventResult = Collect-Events -PackageRoot $packageRoot -StartTime $startTime -MaxEvents $MaxEvents -Errors $errors
             $eventSummary = @($eventResult.Summary)
-            $errors = @($eventResult.Errors)
+            $errors = if ($null -ne $eventResult.Errors) { @($eventResult.Errors) } else { @() }
             Add-ProgressEvent -PackageRoot $packageRoot -Step 'EventLogs' -Status 'OK' -Message "Logs=$($eventSummary.Count)"
         }
         catch {
@@ -715,7 +719,7 @@ function Invoke-EvidenceCollection {
 
     Write-CollectorErrorsSafe -PackageRoot $packageRoot -Errors $errors
 
-    $status = if ($errors.Count -gt 0) { 'Partial' } else { 'Complete' }
+    $status = if (@($errors).Count -gt 0) { 'Partial' } else { 'Complete' }
     $summary = New-SummaryObject -Status $status -PackageRoot $packageRoot -ZipPath $zipPath -TargetKB $TargetKB -DaysBack $DaysBack -MaxEvents $MaxEvents -EventSummary $eventSummary -Copied $copied -NativeResults $nativeResults -Errors $errors
     Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
     Write-PackageReadme -PackageRoot $packageRoot -TargetKB $TargetKB -Status $status
@@ -742,7 +746,7 @@ function Invoke-EvidenceCollection {
         Add-ProgressEvent -PackageRoot $packageRoot -Step 'Zip' -Status 'Error' -Message $_.Exception.Message
     }
 
-    if ($errors.Count -gt 0 -and $summary.Status -ne 'Partial') {
+    if (@($errors).Count -gt 0 -and $summary.Status -ne 'Partial') {
         $summary = New-SummaryObject -Status 'Partial' -PackageRoot $packageRoot -ZipPath $zipPath -TargetKB $TargetKB -DaysBack $DaysBack -MaxEvents $MaxEvents -EventSummary $eventSummary -Copied $copied -NativeResults $nativeResults -Errors $errors
         Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
     }

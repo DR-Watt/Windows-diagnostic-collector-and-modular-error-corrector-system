@@ -193,6 +193,16 @@ function Get-ManifestUiValue {
     return $Fallback
 }
 
+function Format-DetailTextForPane {
+    param([AllowNull()][string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
+    $out = [string]$Text
+    # Régebbi manifesteknél is külön sorba tesszük a számozott lépéseket.
+    $out = [regex]::Replace($out, '(?<!^)(?<!\r)(?<!\n)\s+(\d+\))', ([Environment]::NewLine + [Environment]::NewLine + '$1'))
+    $out = [regex]::Replace($out, '(?<!^)(?<!\r)(?<!\n)\s+(- )', ([Environment]::NewLine + '$1'))
+    return $out.Trim()
+}
+
 function Update-DetailPanes {
     $item = $lvResults.SelectedItem
     if ($null -eq $item) {
@@ -200,8 +210,8 @@ function Update-DetailPanes {
         $txtSelectedAction.Text = ''
         return
     }
-    $txtSelectedSummary.Text = [string]$item.Summary
-    $txtSelectedAction.Text = [string]$item.RecommendedAction
+    $txtSelectedSummary.Text = Format-DetailTextForPane -Text ([string]$item.Summary)
+    $txtSelectedAction.Text = Format-DetailTextForPane -Text ([string]$item.RecommendedAction)
 }
 
 function ConvertTo-ResultItem {
@@ -420,7 +430,7 @@ function Invoke-CollectorModuleFromButton {
         $daysBack = Get-DaysBackFromUi
         $module = Get-RegisteredDiagModules | Where-Object Id -eq $ModuleId | Select-Object -First 1
         if (-not $module) { throw "A $ModuleId modul nem található." }
-        $params = if ($ModuleId -eq 'AILogCollector') { @{ TargetKB = $targetKb; DaysBack = $daysBack } } else { @{ DaysBack = $daysBack } }
+        $params = if ($ModuleId -in @('AILogCollector','SystemEvidenceCollector')) { @{ TargetKB = $targetKb; DaysBack = $daysBack } } else { @{ DaysBack = $daysBack } }
         Add-UiLog "$ModuleId csomag készítése: TargetKB=$targetKb DaysBack=$daysBack"
         $res = Invoke-DiagModuleAction -Module $module -Action 'Invoke-Fix' -Parameters $params
         Add-UiLog (($res | ConvertTo-Json -Depth 12))
