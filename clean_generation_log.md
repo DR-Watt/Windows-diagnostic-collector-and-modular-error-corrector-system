@@ -1,40 +1,87 @@
-# CLEAN Generation Log / Changelog — v1.3.0 P0 Evidence Quality Pack
+# CLEAN Generation Log — DiagFramework v1.3.1 System Evidence Quality Fix Pack
 
 ## Build metadata
 
-- Timestamp: `2026-06-08T15:40:58.806348+00:00`
-- Version: `1.3.0`
-- Scope: `SystemEvidenceCollector` P0 evidence quality
-- Source roadmap: `docs/20260608-160353-HAL-SystemEvidence-deep-analysis-roadmap.md`
+- Project: Windows diagnostic collector and modular error corrector system
+- Version: v1.3.1
+- Build type: SystemEvidenceCollector quality fix
+- Timestamp: 2026-06-08T18:30:00+02:00
+- Output format: Markdown changelog
 
-## Módosított / új fájlok
+## Input evidence
+
+A v1.3.0 futás `OKWithWarnings` állapotot adott, `ErrorCount=0`, `WarningCount=3`. A minőségi elemzés három fejlesztendő pontot azonosított:
+
+1. `disk-event-map.json`: a magyar Event ID 153 üzenetekből a disk szám nem töltődött (`DiskNumber=null`).
+2. `wer-summary.json`: `ReportCount=0`, miközben a manifest sok `Report.wer` fájlt tartalmazott.
+3. `copied_logs`: Panther / Rollback alatt túl sok bináris és nem log jellegű fájl került be.
+
+## Módosított fájlok
 
 - `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
-- `modules/SystemEvidenceCollector/manifest.json`
-- `docs/system_evidence_schema_v1_3_0.md`
-- `docs/collector_acceptance_tests.md`
-- `docs/20260608-160353-HAL-SystemEvidence-deep-analysis-roadmap.md`
-- `validators/Validate-SystemEvidencePackage.ps1`
-- `README_v1.3.0.md`
+- `docs/system_evidence_schema_v1_3_1.md`
+- `docs/collector_acceptance_tests_v1_3_1.md`
+- `clean_generation_log.md`
 
-## Fő implementált P0 elemek
+## Implementált javítások
 
-1. EVTX export.
-2. WindowsUpdate.generated.log.
-3. DISM ScanHealth.
-4. SFC verifyonly.
-5. Storage mapping és Disk 153 map.
-6. Warning/error státuszmodell.
-7. Vendor whitelist/blacklist.
-8. Manifest SHA-256.
-9. Event truncation metadata.
+### Disk Event ID 153 parser
+
+Új függvények:
+
+- `Parse-Disk153Message`
+- `New-Disk153Aggregate`
+
+Kezelt minták:
+
+- magyar: `2 jelű lemez`
+- magyar: `PDO objektum neve: \Device\...`
+- magyar: `0x8000 logikai blokkcím`
+- angol fallback: `disk 2`, `PDO name`, `logical block address`
+
+### WER summary útvonaljavítás
+
+Új függvények:
+
+- `Read-WerReportFile`
+- `Get-WerValueSafe`
+
+Források:
+
+- `copied_logs\ReportArchive`
+- `copied_logs\ReportQueue`
+- `vendor_logs`
+
+### copied_logs policy
+
+Új policy függvények:
+
+- `Get-SystemLogCopyPolicy`
+- `Get-SetupLogCopyPolicy`
+
+Új outputok:
+
+- `copied_logs/skipped-files.json`
+- `copied_logs/system-log-copy-policy.json`
+- `copied_logs/setup-log-copy-policy.json`
+
+### ai_summary v3
+
+Új mezők:
+
+- `TruncatedEventLogCount`
+- `TruncatedEventLogs`
+- `WarningsByCode`
 
 ## Validáció
 
-- JSON manifest validálva Python parserrel.
-- ZIP integritás ellenőrizve.
-- PowerShell runtime teszt nem futott ebben a Linux konténerben.
+- JSON dokumentumok: szintaktikailag ellenőrizve.
+- ZIP integritás: ellenőrizve.
+- PowerShell runtime teszt: nem futtatható ebben a konténerben, kliensoldali PowerShell 7.6.2 validáció szükséges.
 
-## diagnostics_starter_pack
+## Runtime sorrend
 
-A build a Windows 11 PowerShell diagnosztikai sablonra épít; futtatás előtt továbbra is javasolt az `Initialize-DiagEnvironment.ps1` indítása.
+1. Patch kicsomagolása a repo gyökerébe.
+2. `./diagnostics/Initialize-DiagEnvironment.ps1`
+3. `./tools/Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200`
+4. `ai_summary.json`, `storage/disk-event-153-aggregate.json`, `wer/wer-summary.json`, `copied_logs/skipped-files.json` ellenőrzése.
