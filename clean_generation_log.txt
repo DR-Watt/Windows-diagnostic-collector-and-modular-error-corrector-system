@@ -1,0 +1,48 @@
+DiagFramework Windows Update Repair MVP v1.1.0 AI LOG Pack
+Generated: 2026-06-07
+
+Ténylegesen futtatandó fájlok sorrendje:
+1. diagnostics\Initialize-DiagEnvironment.ps1
+2. validators\Validate-Manifests.ps1
+3. Launcher.ps1
+4. opcionális CLI: tools\Collect-AIPackage.ps1 -TargetKB KB5089573 -DaysBack 30
+5. AI csomag után: validators\Validate-AIPackage.ps1 -PackagePath <zip>
+
+Új / módosított komponensek:
+- DiagFramework.psm1: strukturált JSONL naplózás, RunId, Host snapshot, paraméterátadás moduloknak.
+- Launcher.ps1: célzott KB mező, DaysBack mező, AI LOG csomag gomb, Logs mappa gomb.
+- MainWindow.xaml: új GUI sáv AI LOG gyűjtéshez.
+- modules\AILogCollector\manifest.json
+- modules\AILogCollector\AILogCollector.ps1
+- tools\Collect-AIPackage.ps1
+- validators\Validate-AIPackage.ps1
+- collect_ai_logs_for_kb5089573.bat
+- README.md frissítve.
+
+AI csomag tartalma:
+- ai_summary.json
+- manifest.json
+- AI_README.md
+- meta\system-info.json
+- updates\update-history.json
+- updates\target-KB-history.json
+- updates\get-hotfix.json
+- updates\get-windowsupdatelog-result.json
+- events\event-summary.json
+- events\*.jsonl
+- registry\reboot-pending.json
+- commands\native-command-results.json
+- copied_logs\*.log
+- etl_metadata\etl-files.json
+- errors\error-codes.json
+
+Validáció:
+- Manifest JSON fájlok ellenőrizve Python JSON parserrel: 5/5 OK.
+- ZIP integritás ellenőrzése elkészítés után történik.
+- PowerShell futtatási teszt ebben a Linux-alapú környezetben nem végezhető; Windows 11 + PowerShell 7.x admin környezetben kell végső runtime validáció.
+
+Megjegyzés:
+- Az AILogCollector nem javít rendszert, csak olvas/másol és ZIP-et készít.
+- Get-WindowsUpdateLog használata elsődlegesen aktuális PowerShell munkamenetben történik, fallback: Windows PowerShell 5.1 powershell.exe.
+
+[2026-06-07T18:30:28.743164] v1.1.1 hotfix generated. Fixed AILogCollector path TrimStart type issue and flattened event JSON output.

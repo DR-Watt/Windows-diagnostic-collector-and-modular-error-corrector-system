@@ -1,0 +1,9 @@
+{
+  "Id": "WUCacheReset",
+  "Name": "Windows Update cache reset",
+  "Version": "1.0.0",
+  "Author": "DiagFramework",
+  "Script": "WUCacheReset.ps1",
+  "Risk": "Medium",
+  "Description": "SoftwareDistribution és catroot2 átnevezéses reset, szolgáltatás stop/start műveletekkel."
+}

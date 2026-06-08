@@ -1,0 +1,9 @@
+{
+  "Id": "PSWindowsUpdateManager",
+  "Name": "PSWindowsUpdate integráció",
+  "Version": "1.0.0",
+  "Author": "DiagFramework",
+  "Script": "PSWindowsUpdateManager.ps1",
+  "Risk": "Medium",
+  "Description": "Ellenőrzi/telepíti a PSWindowsUpdate modult, majd a GUI-ból frissítéskeresés és telepítés indítható."
+}

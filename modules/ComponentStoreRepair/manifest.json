@@ -1,0 +1,9 @@
+{
+  "Id": "ComponentStoreRepair",
+  "Name": "DISM / SFC rendszerjavítás",
+  "Version": "1.0.0",
+  "Author": "DiagFramework",
+  "Script": "ComponentStoreRepair.ps1",
+  "Risk": "Medium",
+  "Description": "DISM CheckHealth/RestoreHealth és SFC scannow a komponens-store és rendszerfájlhibák javítására."
+}

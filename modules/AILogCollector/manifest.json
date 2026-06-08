@@ -1,0 +1,9 @@
+{
+  "Id": "AILogCollector",
+  "Name": "AI LOG csomag gyűjtő",
+  "Version": "1.1.1",
+  "Author": "DiagTeam",
+  "Script": "AILogCollector.ps1",
+  "Risk": "Low",
+  "Description": "Célzott Windows Update / KB hibaelemző LOG csomagot készít AI vagy külső szakértő számára. v1.1.1: JSON-truncation és útvonal-típushiba hotfix. Nem javít rendszert."
+}

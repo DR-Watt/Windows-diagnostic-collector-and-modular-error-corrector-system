@@ -1,0 +1,9 @@
+{
+  "Id": "WUServiceHealth",
+  "Name": "Windows Update szolgáltatások",
+  "Version": "1.0.0",
+  "Author": "DiagFramework",
+  "Script": "WUServiceHealth.ps1",
+  "Risk": "Low",
+  "Description": "Ellenőrzi és javítja a Windows Update, BITS és Cryptographic Services állapotát."
+}
