@@ -1,0 +1,19 @@
+{
+  "SchemaVersion": "diagframework.storage.hints.v1",
+  "Source": "UserProvidedProjectContext",
+  "Notes": "Disk 2 and Disk 3 are two 8TB SATA HDDs attached to the onboard Intel RAID controller. RAID is configured in JBOD mode.",
+  "KnownDiskGroups": [
+    {
+      "GroupName": "Intel RAID JBOD SATA HDD pair",
+      "DiskNumbers": [
+        2,
+        3
+      ],
+      "ControllerHint": "Onboard Intel RAID controller",
+      "Mode": "JBOD",
+      "DriveCount": 2,
+      "ExpectedDriveDescription": "2x8TB SATA HDD",
+      "DiagnosticMeaning": "Event ID 153 on these disks should be interpreted primarily as storage I/O retry on the SATA HDD / Intel RAID controller / RST driver / cable-port-power path, not as standalone Windows Update evidence."
+    }
+  ]
+}

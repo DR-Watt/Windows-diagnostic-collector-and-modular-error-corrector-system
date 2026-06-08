@@ -2,10 +2,10 @@
 .SYNOPSIS
   Windows 11 rendszerbizonyíték és vendor diagnosztikai LOG gyűjtő modul.
 .DESCRIPTION
-  v1.3.1 System Evidence Quality Fix Pack.
-  Read-only evidence gyűjtés + normalizálási javítások: lokalizált Disk Event ID 153
-  parser, WER ReportArchive/ReportQueue útvonaljavítás, copied_logs whitelist/skipped manifest,
-  részletesebb P0 quality summary és truncation metadata az ai_summary.json fájlban.
+  v1.3.3 Storage Correlation Pack.
+  Read-only evidence gyűjtés + storage korreláció: Disk 2 / Disk 3 → Get-Disk,
+  PhysicalDisk, Win32_DiskDrive mapping; PDO/controller/driver snapshot; Event ID 153
+  idővonal; Windows Update / Setup / Kernel-Boot korreláció; TopFindings és risk summary.
 #>
 [CmdletBinding()]
 param(
@@ -19,7 +19,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ModuleId = 'SystemEvidenceCollector'
-$ModuleVersion = '1.3.2'
+$ModuleVersion = '1.3.3'
 
 function Get-Metadata {
     [PSCustomObject]@{
@@ -27,7 +27,7 @@ function Get-Metadata {
         Name = 'Rendszer LOG bizonyítékgyűjtő'
         Version = $ModuleVersion
         Risk = 'Low'
-        Summary = 'Windows 11 P0 read-only evidence + quality fixes: lokalizált disk 153 parser, WER aggregálás, copied_logs whitelist és részletesebb ai_summary.'
+        Summary = 'Windows 11 P0 read-only evidence + storage correlation: Disk 2/3 Intel RAID JBOD HDD mapping, Event ID 153 timeline, controller/driver context és top findings.'
     }
 }
 
@@ -627,11 +627,324 @@ function New-CbsHResultSummary {
     Write-JsonSafe -InputObject @($summary | Sort-Object Count -Descending) -Path $OutPath -Depth 6
 }
 
+
+function Get-StorageHints {
+    param([string]$PackageRoot)
+    $default = [PSCustomObject]@{
+        SchemaVersion = 'diagframework.storage.hints.v1'
+        Source = 'UserProvidedProjectContext'
+        Notes = 'A felhasználói projektkontextus szerint Disk 2 és Disk 3 az alaplapi Intel RAID controllerre csatolt 2x8TB SATA HDD; a RAID JBOD üzemmódban van.'
+        KnownDiskGroups = @(
+            [PSCustomObject]@{
+                GroupName = 'Intel RAID JBOD SATA HDD pair'
+                DiskNumbers = @(2,3)
+                ControllerHint = 'Onboard Intel RAID controller'
+                Mode = 'JBOD'
+                DriveCount = 2
+                ExpectedDriveDescription = '2x8TB SATA HDD'
+                DiagnosticMeaning = 'Event ID 153 ezen diskeken valószínűleg SATA HDD / Intel RAID controller / RST driver / port / kábel / energiagazdálkodás irányú I/O retry jel.'
+            }
+        )
+    }
+    $configPath = Join-Path $PSScriptRoot '..\..\config\storage_hints.json'
+    try {
+        if (Test-Path -LiteralPath $configPath) {
+            $cfg = Get-Content -LiteralPath $configPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+            return $cfg
+        }
+    }
+    catch {
+        try {
+            Add-ProgressEvent -PackageRoot $PackageRoot -Step 'StorageHints' -Status 'Warning' -Message ("storage_hints.json read failed: {0}" -f $_.Exception.Message)
+        } catch { }
+    }
+    return $default
+}
+
+function Test-DiskNumberInHintGroup {
+    param($Hints, [AllowNull()]$DiskNumber)
+    if ($null -eq $DiskNumber) { return $null }
+    foreach ($group in @($Hints.KnownDiskGroups)) {
+        foreach ($n in @($group.DiskNumbers)) {
+            if ([string]$n -eq [string]$DiskNumber) { return $group }
+        }
+    }
+    return $null
+}
+
+function Get-StorageControllerSnapshot {
+    $controllers = @()
+    try {
+        foreach ($c in @(Get-CimInstance -ClassName Win32_SCSIController -ErrorAction Stop)) {
+            $controllers += [PSCustomObject]@{ Source='Win32_SCSIController'; Data=(ConvertTo-FlatObject $c) }
+        }
+    } catch { $controllers += [PSCustomObject]@{ Source='Win32_SCSIController'; Error=$_.Exception.Message } }
+    try {
+        foreach ($c in @(Get-CimInstance -ClassName Win32_IDEController -ErrorAction Stop)) {
+            $controllers += [PSCustomObject]@{ Source='Win32_IDEController'; Data=(ConvertTo-FlatObject $c) }
+        }
+    } catch { $controllers += [PSCustomObject]@{ Source='Win32_IDEController'; Error=$_.Exception.Message } }
+    try {
+        $pnp = @(Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction Stop | Where-Object { ([string]$_.Name + ' ' + [string]$_.PNPDeviceID + ' ' + [string]$_.Service) -match '(?i)intel|raid|rst|sata|ahci|storage|controller|scsi' })
+        foreach ($p in $pnp) { $controllers += [PSCustomObject]@{ Source='Win32_PnPEntityFiltered'; Data=(ConvertTo-FlatObject $p) } }
+    } catch { $controllers += [PSCustomObject]@{ Source='Win32_PnPEntityFiltered'; Error=$_.Exception.Message } }
+    return $controllers
+}
+
+function Get-StorageDriverSnapshot {
+    $drivers = @()
+    try {
+        $raw = @(Get-CimInstance -ClassName Win32_PnPSignedDriver -ErrorAction Stop | Where-Object {
+            ([string]$_.DeviceClass -match '(?i)hdc|scsiadapter|diskdrive|storage') -or
+            (([string]$_.DeviceName + ' ' + [string]$_.Manufacturer + ' ' + [string]$_.DriverProviderName + ' ' + [string]$_.InfName) -match '(?i)intel|raid|rst|sata|ahci|storage|controller')
+        })
+        foreach ($d in $raw) {
+            $drivers += ConvertTo-FlatObject $d @('DeviceName','Manufacturer','DriverProviderName','DriverVersion','DriverDate','InfName','DeviceClass','DeviceID','PDO','IsSigned','Signer')
+        }
+    } catch { $drivers += [PSCustomObject]@{ Error=$_.Exception.Message } }
+    return $drivers
+}
+
+function Get-PnpStorageDeviceSnapshot {
+    $items = @()
+    try {
+        $cmd = Get-Command -Name Get-PnpDevice -ErrorAction SilentlyContinue
+        if ($null -eq $cmd) { return @([PSCustomObject]@{ Status='Unavailable'; Reason='Get-PnpDevice cmdlet is not available in this PowerShell session.' }) }
+        $classes = @('DiskDrive','SCSIAdapter','HDC')
+        foreach ($cls in $classes) {
+            try {
+                foreach ($d in @(Get-PnpDevice -Class $cls -ErrorAction SilentlyContinue)) {
+                    $items += [PSCustomObject]@{ Class=$cls; Status=$d.Status; FriendlyName=$d.FriendlyName; InstanceId=$d.InstanceId; Problem=$d.Problem; Present=$d.Present }
+                }
+            } catch { }
+        }
+    } catch { $items += [PSCustomObject]@{ Status='Error'; Error=$_.Exception.Message } }
+    return $items
+}
+
+function Get-PropertyFromFlatObjectSafe {
+    param($Object, [string]$Name)
+    try {
+        if ($null -ne $Object -and $Object.PSObject.Properties[$Name]) { return $Object.PSObject.Properties[$Name].Value }
+    } catch { }
+    return $null
+}
+
+function Find-FlatByPropertyValue {
+    param($Items, [string]$PropertyName, [AllowNull()]$Value)
+    if ($null -eq $Value) { return $null }
+    try { return @(@($Items) | Where-Object { [string](Get-PropertyFromFlatObjectSafe $_ $PropertyName) -eq [string]$Value } | Select-Object -First 1) } catch { return $null }
+}
+
+function New-Disk153Timeline {
+    param($EventMap = @())
+    $timeline = @()
+    $sorted = @($EventMap | Sort-Object { try { [datetime]$_.TimeCreated } catch { [datetime]::MinValue } })
+    $index = 0
+    $prevTime = $null
+    foreach ($ev in $sorted) {
+        $index++
+        $t = $null
+        try { $t = [datetime]$ev.TimeCreated } catch { $t = $null }
+        $deltaSeconds = $null
+        if ($null -ne $t -and $null -ne $prevTime) { $deltaSeconds = [int]([TimeSpan]($t - $prevTime)).TotalSeconds }
+        if ($null -ne $t) { $prevTime = $t }
+        $timeline += [PSCustomObject]@{
+            Sequence = $index
+            TimeCreated = $ev.TimeCreated
+            DeltaSecondsFromPreviousDisk153 = $deltaSeconds
+            DiskNumber = $ev.DiskNumberFromMessage
+            PdoObjectName = $ev.PdoObjectName
+            LogicalBlockAddress = $ev.LogicalBlockAddress
+            ProviderName = $ev.ProviderName
+            EventId = $ev.EventId
+            Parser = $ev.Parser
+        }
+    }
+    return $timeline
+}
+
+function New-DiskDeviceCorrelation {
+    param($EventMap = @(), $StorageResult, $Hints, $Controllers = @(), $Drivers = @(), $PnpDevices = @())
+    $diskNumbers = @()
+    foreach ($n in @($EventMap | ForEach-Object { $_.DiskNumberFromMessage })) { if ($null -ne $n -and $diskNumbers -notcontains [string]$n) { $diskNumbers += [string]$n } }
+    foreach ($g in @($Hints.KnownDiskGroups)) { foreach ($n in @($g.DiskNumbers)) { if ($diskNumbers -notcontains [string]$n) { $diskNumbers += [string]$n } } }
+    $correlation = @()
+    foreach ($dn in @($diskNumbers | Sort-Object {[int]$_})) {
+        $disk = Find-FlatByPropertyValue -Items $StorageResult.Disks -PropertyName 'Number' -Value $dn
+        $cimDisk = Find-FlatByPropertyValue -Items $StorageResult.Win32_DiskDrive -PropertyName 'Index' -Value $dn
+        if ($null -eq $cimDisk) { $cimDisk = Find-FlatByPropertyValue -Items $StorageResult.Win32_DiskDrive -PropertyName 'DeviceID' -Value ("\\.\PHYSICALDRIVE{0}" -f $dn) }
+        $partitions = @($StorageResult.Partitions | Where-Object { [string](Get-PropertyFromFlatObjectSafe $_ 'DiskNumber') -eq [string]$dn })
+        $volumes = @()
+        foreach ($p in $partitions) {
+            $driveLetter = Get-PropertyFromFlatObjectSafe $p 'DriveLetter'
+            if (-not [string]::IsNullOrWhiteSpace([string]$driveLetter)) {
+                $v = @($StorageResult.Volumes | Where-Object { [string](Get-PropertyFromFlatObjectSafe $_ 'DriveLetter') -eq [string]$driveLetter } | Select-Object -First 1)
+                if ($v) { $volumes += $v }
+            }
+        }
+        $physical = $null
+        try {
+            $physical = @($StorageResult.PhysicalDisks | Where-Object {
+                ([string](Get-PropertyFromFlatObjectSafe $_ 'DeviceId') -eq [string]$dn) -or
+                ([string](Get-PropertyFromFlatObjectSafe $_ 'FriendlyName') -eq [string](Get-PropertyFromFlatObjectSafe $disk 'FriendlyName')) -or
+                ([string](Get-PropertyFromFlatObjectSafe $_ 'SerialNumber') -eq [string](Get-PropertyFromFlatObjectSafe $disk 'SerialNumber'))
+            } | Select-Object -First 1)
+        } catch { $physical = $null }
+        $events = @($EventMap | Where-Object { [string]$_.DiskNumberFromMessage -eq [string]$dn })
+        $hint = Test-DiskNumberInHintGroup -Hints $Hints -DiskNumber $dn
+        $correlation += [PSCustomObject]@{
+            DiskNumber = [int]$dn
+            Event153Count = @($events).Count
+            PdoObjectNames = @($events | Group-Object PdoObjectName | Sort-Object Count -Descending | ForEach-Object { [PSCustomObject]@{ PdoObjectName=$_.Name; Count=$_.Count } })
+            Disk = $disk
+            Win32_DiskDrive = $cimDisk
+            PhysicalDisk = $physical
+            Partitions = $partitions
+            Volumes = $volumes
+            KnownHint = $hint
+            ControllerSnapshot = $Controllers
+            StorageDriverSnapshot = $Drivers
+            PnpStorageDevices = $PnpDevices
+            Interpretation = if ($hint) { 'User context maps this disk to the onboard Intel RAID controller JBOD SATA HDD group.' } else { 'No explicit user-provided disk hint matched this disk number.' }
+        }
+    }
+    return $correlation
+}
+
+function Get-EventCorrelationWindowSafe {
+    param([datetime]$CenterTime, [int]$WindowMinutes = 15, [int]$MaxEventsPerLog = 30)
+    $items = @()
+    if ($null -eq $CenterTime) { return $items }
+    $start = $CenterTime.AddMinutes(-1 * [Math]::Abs($WindowMinutes))
+    $end = $CenterTime.AddMinutes([Math]::Abs($WindowMinutes))
+    $queries = @(
+        @{ Name='WindowsUpdateClient'; LogName='Microsoft-Windows-WindowsUpdateClient/Operational' },
+        @{ Name='Setup'; LogName='Setup' },
+        @{ Name='KernelBoot'; LogName='Microsoft-Windows-Kernel-Boot/Operational' },
+        @{ Name='KernelPnP'; LogName='Microsoft-Windows-Kernel-PnP/Configuration' },
+        @{ Name='System'; LogName='System' }
+    )
+    foreach ($q in $queries) {
+        try {
+            $events = @(Get-WinEvent -FilterHashtable @{ LogName=$q.LogName; StartTime=$start; EndTime=$end } -MaxEvents $MaxEventsPerLog -ErrorAction Stop)
+            foreach ($ev in $events) {
+                $items += [PSCustomObject]@{
+                    CorrelationLog = $q.Name
+                    LogName = $ev.LogName
+                    ProviderName = $ev.ProviderName
+                    Id = $ev.Id
+                    TimeCreated = if ($ev.TimeCreated) { ([datetime]$ev.TimeCreated).ToString('o') } else { $null }
+                    LevelDisplayName = ConvertTo-SafeString $ev.LevelDisplayName
+                    RecordId = $ev.RecordId
+                    MessagePreview = (ConvertTo-SafeString $ev.Message)
+                }
+            }
+        }
+        catch { }
+    }
+    return $items
+}
+
+function New-Disk153UpdateCorrelation {
+    param($EventMap = @(), [int]$WindowMinutes = 15)
+    $correlated = @()
+    foreach ($ev in @($EventMap | Sort-Object { try { [datetime]$_.TimeCreated } catch { [datetime]::MinValue } })) {
+        $t = $null
+        try { $t = [datetime]$ev.TimeCreated } catch { $t = $null }
+        $around = @(Get-EventCorrelationWindowSafe -CenterTime $t -WindowMinutes $WindowMinutes -MaxEventsPerLog 20)
+        $correlated += [PSCustomObject]@{
+            Disk153TimeCreated = $ev.TimeCreated
+            DiskNumber = $ev.DiskNumberFromMessage
+            PdoObjectName = $ev.PdoObjectName
+            LogicalBlockAddress = $ev.LogicalBlockAddress
+            WindowMinutes = $WindowMinutes
+            CorrelatedEventCount = @($around).Count
+            ByLog = @($around | Group-Object CorrelationLog | Sort-Object Count -Descending | ForEach-Object { [PSCustomObject]@{ Log=$_.Name; Count=$_.Count } })
+            Events = @($around | Select-Object -First 80)
+        }
+    }
+    return $correlated
+}
+
+function New-StorageRiskSummary {
+    param($EventMap = @(), $Correlation = @(), $Hints, $Timeline = @())
+    $disk153Count = @($EventMap).Count
+    $byDisk = @($EventMap | Group-Object DiskNumberFromMessage | Sort-Object Count -Descending | ForEach-Object { [PSCustomObject]@{ DiskNumber=$_.Name; Count=$_.Count } })
+    $byPdo = @($EventMap | Group-Object PdoObjectName | Sort-Object Count -Descending | ForEach-Object { [PSCustomObject]@{ PdoObjectName=$_.Name; Count=$_.Count } })
+    $riskLevel = if ($disk153Count -ge 30) { 'HighSignal' } elseif ($disk153Count -gt 0) { 'MediumSignal' } else { 'NoSignal' }
+    $jbodEvents = 0
+    foreach ($ev in @($EventMap)) { if (Test-DiskNumberInHintGroup -Hints $Hints -DiskNumber $ev.DiskNumberFromMessage) { $jbodEvents++ } }
+    [PSCustomObject]@{
+        SchemaVersion = 'diagframework.storage.risk.summary.v1'
+        RiskLevel = $riskLevel
+        Disk153Count = $disk153Count
+        Disk153EventsOnKnownIntelRaidJbodGroup = $jbodEvents
+        UserProvidedTopology = $Hints
+        ByDiskNumber = $byDisk
+        ByPdoObjectName = $byPdo
+        TimeRange = [PSCustomObject]@{
+            Oldest = @($Timeline | Where-Object { $_.TimeCreated } | Sort-Object TimeCreated | Select-Object -First 1).TimeCreated
+            Newest = @($Timeline | Where-Object { $_.TimeCreated } | Sort-Object TimeCreated | Select-Object -Last 1).TimeCreated
+        }
+        Interpretation = @(
+            'Event ID 153 is an I/O retry signal. It does not prove physical disk failure by itself.',
+            'Because Disk 2 and Disk 3 are user-confirmed 2x8TB SATA HDDs behind the onboard Intel RAID controller in JBOD mode, the primary diagnostic path is the Intel RST/RAID controller driver, SATA path, ports/cables, HDD health, power management and firmware.',
+            'Windows Update / rollback correlation should compare disk 153 timestamps with Setup, WindowsUpdateClient and Kernel-Boot events.'
+        )
+    }
+}
+
+function New-TopFindingsForStorage {
+    param($RiskSummary, $Correlation = @())
+    $findings = @()
+    if ($RiskSummary.Disk153Count -gt 0) {
+        $findings += [PSCustomObject]@{
+            Severity='High'
+            Area='Storage'
+            Title='Disk Event ID 153 detected on user-confirmed Intel RAID JBOD HDD group'
+            Evidence=("Disk153Count={0}; OnKnownIntelRaidJbodGroup={1}" -f $RiskSummary.Disk153Count, $RiskSummary.Disk153EventsOnKnownIntelRaidJbodGroup)
+            Meaning='Storage I/O retry pattern; likely relevant to update/rollback instability if timestamps correlate with setup or reboot windows.'
+        }
+    }
+    foreach ($d in @($RiskSummary.ByDiskNumber)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$d.DiskNumber)) {
+            $findings += [PSCustomObject]@{ Severity='Medium'; Area='Storage'; Title=("Disk {0} has Event ID 153 retry events" -f $d.DiskNumber); Evidence=("Count={0}" -f $d.Count); Meaning='Map this disk to physical HDD, controller and volume before repair actions.' }
+        }
+    }
+    return $findings
+}
+
+function New-RiskIndicatorsForStorage {
+    param($RiskSummary)
+    $items = @()
+    if ($RiskSummary.Disk153Count -gt 0) { $items += [PSCustomObject]@{ Code='StorageIoRetry153'; Strength=$RiskSummary.RiskLevel; Count=$RiskSummary.Disk153Count; Description='Disk provider Event ID 153 indicates I/O retry. Investigate storage path before aggressive Windows Update repair.' } }
+    if ($RiskSummary.Disk153EventsOnKnownIntelRaidJbodGroup -gt 0) { $items += [PSCustomObject]@{ Code='IntelRaidJbodSataPath'; Strength='ContextConfirmed'; Count=$RiskSummary.Disk153EventsOnKnownIntelRaidJbodGroup; Description='User confirmed Disk 2/3 are SATA HDDs behind onboard Intel RAID controller in JBOD mode.' } }
+    return $items
+}
+
+function New-SuggestedNextEvidenceForStorage {
+    param($RiskSummary)
+    $items = @(
+        [PSCustomObject]@{ Priority='P0'; Evidence='Run vendor or Intel RST storage diagnostics and export logs'; Reason='Controller/JBOD layer is in the suspected path.' },
+        [PSCustomObject]@{ Priority='P0'; Evidence='Collect SMART / manufacturer HDD health data for Disk 2 and Disk 3'; Reason='Differentiate controller/path retry from drive-level media or command timeout issues.' },
+        [PSCustomObject]@{ Priority='P1'; Evidence='Check SATA cable/port/power path for the two 8TB HDDs'; Reason='Event 153 can be caused by transient storage path retries.' },
+        [PSCustomObject]@{ Priority='P1'; Evidence='Correlate disk153-timeline.json with WindowsUpdateClient, Setup and Kernel-Boot event windows'; Reason='Determines whether storage retries happen during update/rollback windows.' },
+        [PSCustomObject]@{ Priority='P2'; Evidence='Review Intel RAID/RST driver version, firmware and chipset driver status'; Reason='JBOD behind Intel RAID controller makes the storage controller driver diagnostically relevant.' }
+    )
+    return $items
+}
+
 function Collect-StorageEvidence {
     param([string]$PackageRoot, [datetime]$StartTime)
     $root = Join-Path $PackageRoot 'storage'
+    $analysisRoot = Join-Path $PackageRoot 'analysis'
     New-DirectorySafe $root
+    New-DirectorySafe $analysisRoot
     $result = @{}
+    $hints = Get-StorageHints -PackageRoot $PackageRoot
+    Write-JsonSafe -InputObject $hints -Path (Join-Path $root 'storage-hints.json') -Depth 10
+
     try { $result.Disks = @(Get-Disk -ErrorAction Stop | ForEach-Object { ConvertTo-FlatObject $_ }) } catch { $result.Disks = @([PSCustomObject]@{ Error=$_.Exception.Message }) }
     try { $result.PhysicalDisks = @(Get-PhysicalDisk -ErrorAction Stop | ForEach-Object { ConvertTo-FlatObject $_ }) } catch { $result.PhysicalDisks = @([PSCustomObject]@{ Error=$_.Exception.Message }) }
     try { $result.Volumes = @(Get-Volume -ErrorAction Stop | ForEach-Object { ConvertTo-FlatObject $_ }) } catch { $result.Volumes = @([PSCustomObject]@{ Error=$_.Exception.Message }) }
@@ -643,6 +956,10 @@ function Collect-StorageEvidence {
     try { $result.LogicalDiskToPartition = @(Get-CimInstance Win32_LogicalDiskToPartition -ErrorAction Stop | ForEach-Object { ConvertTo-FlatObject $_ }) } catch { $result.LogicalDiskToPartition = @([PSCustomObject]@{ Error=$_.Exception.Message }) }
     try { $result.StorageReliabilityCounters = @(Get-PhysicalDisk -ErrorAction Stop | Get-StorageReliabilityCounter -ErrorAction Stop | ForEach-Object { ConvertTo-FlatObject $_ }) } catch { $result.StorageReliabilityCounters = @([PSCustomObject]@{ Error=$_.Exception.Message }) }
 
+    $controllers = @(Get-StorageControllerSnapshot)
+    $storageDrivers = @(Get-StorageDriverSnapshot)
+    $pnpStorageDevices = @(Get-PnpStorageDeviceSnapshot)
+
     Write-JsonSafe -InputObject $result.Disks -Path (Join-Path $root 'disks.json') -Depth 8
     Write-JsonSafe -InputObject $result.PhysicalDisks -Path (Join-Path $root 'physical-disks.json') -Depth 8
     Write-JsonSafe -InputObject $result.Volumes -Path (Join-Path $root 'volumes.json') -Depth 8
@@ -651,6 +968,9 @@ function Collect-StorageEvidence {
     Write-JsonSafe -InputObject $result.DiskDriveToDiskPartition -Path (Join-Path $root 'diskdrive-to-partition-map.json') -Depth 8
     Write-JsonSafe -InputObject $result.LogicalDiskToPartition -Path (Join-Path $root 'logicaldisk-to-partition-map.json') -Depth 8
     Write-JsonSafe -InputObject $result.StorageReliabilityCounters -Path (Join-Path $root 'storage-reliability-counters.json') -Depth 8
+    Write-JsonSafe -InputObject $controllers -Path (Join-Path $root 'controller-driver-map.json') -Depth 12
+    Write-JsonSafe -InputObject $storageDrivers -Path (Join-Path $root 'storage-driver-snapshot.json') -Depth 10
+    Write-JsonSafe -InputObject $pnpStorageDevices -Path (Join-Path $root 'pnp-storage-devices.json') -Depth 10
 
     $diskEvents = @()
     try {
@@ -666,6 +986,7 @@ function Collect-StorageEvidence {
         if ($null -ne $parsed.DiskNumberFromMessage) {
             try { $diskObject = @($result.Disks | Where-Object { [string]$_.Number -eq [string]$parsed.DiskNumberFromMessage } | Select-Object -First 1) } catch { $diskObject = $null }
         }
+        $hint = Test-DiskNumberInHintGroup -Hints $hints -DiskNumber $parsed.DiskNumberFromMessage
         $eventMap += [PSCustomObject]@{
             DiskNumber = $parsed.DiskNumberFromMessage
             DiskNumberFromMessage = $parsed.DiskNumberFromMessage
@@ -676,20 +997,48 @@ function Collect-StorageEvidence {
             TimeCreated = $ev.TimeCreated
             ProviderName = $ev.ProviderName
             MatchedDisk = $diskObject
+            KnownHint = $hint
             Message = $ev.Message
         }
     }
     $aggregate = New-Disk153Aggregate -EventMap $eventMap
+    $timeline = @(New-Disk153Timeline -EventMap $eventMap)
+    $correlation = @(New-DiskDeviceCorrelation -EventMap $eventMap -StorageResult $result -Hints $hints -Controllers $controllers -Drivers $storageDrivers -PnpDevices $pnpStorageDevices)
+    $eventCorrelation = @(New-Disk153UpdateCorrelation -EventMap $eventMap -WindowMinutes 15)
+    $riskSummary = New-StorageRiskSummary -EventMap $eventMap -Correlation $correlation -Hints $hints -Timeline $timeline
+    $topFindings = @(New-TopFindingsForStorage -RiskSummary $riskSummary -Correlation $correlation)
+    $riskIndicators = @(New-RiskIndicatorsForStorage -RiskSummary $riskSummary)
+    $suggestedNextEvidence = @(New-SuggestedNextEvidenceForStorage -RiskSummary $riskSummary)
+
     Write-JsonSafe -InputObject $eventMap -Path (Join-Path $root 'disk-event-map.json') -Depth 12
     Write-JsonSafe -InputObject $aggregate -Path (Join-Path $root 'disk-event-153-aggregate.json') -Depth 10
+    Write-JsonSafe -InputObject $timeline -Path (Join-Path $root 'disk153-timeline.json') -Depth 10
+    Write-JsonSafe -InputObject $correlation -Path (Join-Path $root 'disk153-device-correlation.json') -Depth 14
+    Write-JsonSafe -InputObject $eventCorrelation -Path (Join-Path $root 'disk153-update-setup-correlation.json') -Depth 12
+    Write-JsonSafe -InputObject $riskSummary -Path (Join-Path $root 'storage-risk-summary.json') -Depth 12
+    Write-JsonSafe -InputObject $topFindings -Path (Join-Path $analysisRoot 'top-findings.json') -Depth 10
+    Write-JsonSafe -InputObject $riskIndicators -Path (Join-Path $analysisRoot 'risk-indicators.json') -Depth 10
+    Write-JsonSafe -InputObject $suggestedNextEvidence -Path (Join-Path $analysisRoot 'suggested-next-evidence.json') -Depth 10
+    Write-JsonSafe -InputObject $suggestedNextEvidence -Path (Join-Path $analysisRoot 'suggested-next-actions.json') -Depth 10
+
     return [PSCustomObject]@{
         DiskCount=@($result.Disks).Count
         PhysicalDiskCount=@($result.PhysicalDisks).Count
         Disk153Count=@($diskEvents).Count
         Disk153ByDiskNumber=$aggregate.ByDiskNumber
         Disk153ByPdoObjectName=$aggregate.ByPdoObjectName
+        Disk153KnownIntelRaidJbodCount=$riskSummary.Disk153EventsOnKnownIntelRaidJbodGroup
+        ControllerDriverMap='storage/controller-driver-map.json'
+        Disk153Timeline='storage/disk153-timeline.json'
+        Disk153DeviceCorrelation='storage/disk153-device-correlation.json'
+        Disk153UpdateSetupCorrelation='storage/disk153-update-setup-correlation.json'
+        StorageRiskSummary='storage/storage-risk-summary.json'
+        TopFindings=$topFindings
+        RiskIndicators=$riskIndicators
+        SuggestedNextEvidence=$suggestedNextEvidence
     }
 }
+
 function Get-VendorLogPolicy {
     [PSCustomObject]@{
         SchemaVersion='diagframework.vendorlog.policy.v1'
@@ -877,6 +1226,7 @@ function Get-ObjectPropertyValueSafe {
     return $Default
 }
 
+
 function New-SummaryObject {
     param([string]$Status,[string]$PackageRoot,[string]$ZipPath,[string]$TargetKB,[int]$DaysBack,[int]$MaxEvents,$EventSummary=@(),$Copied=@(),$NativeResults=@(),$Issues=@(),$P0Results=@())
     $split = Split-IssuesBySeverity -Issues $Issues
@@ -894,8 +1244,17 @@ function New-SummaryObject {
         }
     )
     $warningsByCode = @(@($split.Warnings) | Group-Object Code | Sort-Object Count -Descending | ForEach-Object { [PSCustomObject]@{ Code=$_.Name; Count=$_.Count } })
+    $topFindings = @(); $riskIndicators = @(); $suggestedNextEvidence = @()
+    try {
+        $storageP0 = @(@($P0Results) | Where-Object { $_.Area -eq 'Storage' } | Select-Object -First 1)
+        if ($storageP0 -and $storageP0.Result) {
+            $topFindings = @($storageP0.Result.TopFindings)
+            $riskIndicators = @($storageP0.Result.RiskIndicators)
+            $suggestedNextEvidence = @($storageP0.Result.SuggestedNextEvidence)
+        }
+    } catch { }
     [PSCustomObject]@{
-        SchemaVersion='diagframework.systemevidence.summary.v3.1'
+        SchemaVersion='diagframework.systemevidence.summary.v3.3'
         ModuleId=$ModuleId
         ModuleVersion=$ModuleVersion
         Status=$Status
@@ -914,10 +1273,14 @@ function New-SummaryObject {
         ErrorCount=@($split.Errors).Count
         WarningCount=@($split.Warnings).Count
         WarningsByCode=$warningsByCode
-        Purpose='AI/szakértő által elemezhető Windows 11 P0 read-only evidence csomag normalizált disk/WER/setup-log adatokkal.'
+        Purpose='AI/szakértő által elemezhető Windows 11 P0 read-only evidence csomag storage korrelációval és top findings mezőkkel.'
         P0Evidence=$P0Results
+        TopFindings=$topFindings
+        RiskIndicators=$riskIndicators
+        SuggestedNextEvidence=$suggestedNextEvidence
     }
 }
+
 function Invoke-EvidenceCollection {
     param([int]$DaysBack=30,[int]$MaxEvents=1200,[switch]$WhatIf,[string]$TargetKB='')
     Write-LogRootReadmes -LogRootPath $LogRoot -TargetKB $TargetKB
@@ -927,12 +1290,12 @@ function Invoke-EvidenceCollection {
     $suffix = if ([string]::IsNullOrWhiteSpace($TargetKB)) { 'SystemEvidence' } else { 'SystemEvidence-' + $TargetKB }
     $packageRoot = Join-Path $evidenceRoot ("$timestamp-$env:COMPUTERNAME-$suffix")
     $zipPath = "$packageRoot.zip"
-    foreach ($sub in 'meta','events','events/raw','registry','copied_logs','drivers','commands','errors','vendor_logs','windows_update','servicing','storage','wer') { New-DirectorySafe (Join-Path $packageRoot $sub) }
+    foreach ($sub in 'meta','events','events/raw','registry','copied_logs','drivers','commands','errors','vendor_logs','windows_update','servicing','storage','wer','analysis') { New-DirectorySafe (Join-Path $packageRoot $sub) }
     Write-PackageReadme -PackageRoot $packageRoot -TargetKB $TargetKB -Status 'InProgress'
     $issues=@(); $eventSummary=@(); $copied=@(); $nativeResults=@(); $p0Results=@()
     Add-ProgressEvent $packageRoot 'Start' 'OK' "DaysBack=$DaysBack MaxEvents=$MaxEvents TargetKB=$TargetKB WhatIf=$($WhatIf.IsPresent)"
     if ($WhatIf) {
-        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v3.1'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256') }
+        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v3.1'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256','Storage controller correlation','Disk 153 timeline','TopFindings/RiskIndicators/SuggestedNextEvidence') }
         Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
         return $summary
     }
