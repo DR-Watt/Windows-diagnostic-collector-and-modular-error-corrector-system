@@ -1,18 +1,18 @@
 {
   "Id": "ComponentStoreRepair",
-  "Name": "DISM / SFC rendszerjavítás",
-  "Version": "1.0.0",
-  "Author": "DiagFramework",
+  "Name": "Komponens-store javítás",
+  "Version": "1.2.8",
+  "Author": "DiagTeam",
   "Script": "ComponentStoreRepair.ps1",
   "Risk": "Medium",
-  "Description": "DISM CheckHealth/RestoreHealth és SFC scannow a komponens-store és rendszerfájlhibák javítására.",
   "Category": "Repair",
+  "Description": "DISM/SFC alapú rendszerjavító modul.",
   "Ui": {
-    "Summary": "A Windows komponens-store és védett rendszerfájlok javítására szolgáló modul.\n\nMit vizsgál / javít:\n1) DISM CheckHealth: gyors állapotellenőrzés, hogy az image egészséges, javítható vagy sérült-e.\n2) DISM RestoreHealth: a komponens-store helyreállítása.\n3) SFC /scannow: védett rendszerfájlok ellenőrzése és javítása.\n\nEz a modul akkor releváns, ha a Windows Update telepítés CBS/DISM/servicing hibára fut, vagy a kumulatív frissítés integrációja sérült komponens-store miatt áll meg.",
-    "RecommendedAction": "Javasolt sorrend:\n1) Először készíts célzott AI LOG vagy rendszer evidence csomagot.\n2) Nézd át a CBS.log, DISM.log és ai_summary.json információit.\n3) Ha servicing vagy komponens-store hiba látszik, futtasd a DISM javítást.\n4) A DISM után futtasd az SFC /scannow ellenőrzést.\n5) Indítsd újra a gépet.\n6) Ezután próbáld újra a Windows Update telepítést.\n\nOffline vagy szigorúan korlátozott hálózatnál repair source megadása válhat szükségessé.",
-    "ToolTip": "DISM /Online /Cleanup-Image /CheckHealth, RestoreHealth és SFC munkafolyamat.",
-    "ExpectedOutput": "JSONL futási log + DISM/SFC parancskimenet.",
-    "Impact": "Medium: rendszerjavító művelet, hosszú futás és újraindítási igény előfordulhat.",
-    "DetailedSteps": "Javasolt sorrend:\n1) Először készíts célzott AI LOG vagy rendszer evidence csomagot.\n2) Nézd át a CBS.log, DISM.log és ai_summary.json információit.\n3) Ha servicing vagy komponens-store hiba látszik, futtasd a DISM javítást.\n4) A DISM után futtasd az SFC /scannow ellenőrzést.\n5) Indítsd újra a gépet.\n6) Ezután próbáld újra a Windows Update telepítést.\n\nOffline vagy szigorúan korlátozott hálózatnál repair source megadása válhat szükségessé."
+    "Summary": "DISM/SFC alapú rendszerjavító modul.\n\nMit vizsgál:\n1) Komponens-store sérülés.\n2) CBS/DISM servicing állapot.\n3) Védett rendszerfájlok konzisztenciája.\n\nA modul javítási lépései a Windows image és rendszerfájlok helyreállítását célozzák.",
+    "RecommendedAction": "Javasolt lépések:\n1) Először készíts LOG csomagot.\n2) Nézd át a CBS.log és DISM.log fájlokat.\n3) Ha servicing hiba látszik, futtasd DISM RestoreHealth műveletet.\n4) Utána futtasd az SFC ellenőrzést.\n5) Indítsd újra a gépet.\n6) Próbáld újra a Windows Update telepítést.",
+    "DetailedSteps": "Javasolt lépések:\n1) Először készíts LOG csomagot.\n2) Nézd át a CBS.log és DISM.log fájlokat.\n3) Ha servicing hiba látszik, futtasd DISM RestoreHealth műveletet.\n4) Utána futtasd az SFC ellenőrzést.\n5) Indítsd újra a gépet.\n6) Próbáld újra a Windows Update telepítést.",
+    "ToolTip": "DISM/SFC alapú rendszerjavító modul.",
+    "ExpectedOutput": "JSONL futási log",
+    "Impact": "Medium: rendszerjavító művelet."
   }
 }

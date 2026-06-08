@@ -1,18 +1,18 @@
 {
   "Id": "PSWindowsUpdateManager",
-  "Name": "PSWindowsUpdate integráció",
-  "Version": "1.0.0",
-  "Author": "DiagFramework",
+  "Name": "Windows Update menedzser",
+  "Version": "1.2.8",
+  "Author": "DiagTeam",
   "Script": "PSWindowsUpdateManager.ps1",
   "Risk": "Medium",
-  "Description": "Ellenőrzi/telepíti a PSWindowsUpdate modult, majd a GUI-ból frissítéskeresés és telepítés indítható.",
   "Category": "UpdateManagement",
+  "Description": "PSWindowsUpdate integráció.",
   "Ui": {
-    "Summary": "A Windows Update keresés és telepítés PowerShellből történő vezérlését segítő integráció.\n\nMit csinál:\n1) Ellenőrzi a PSWindowsUpdate modul meglétét.\n2) Szükség esetén telepíti vagy importálja a modult.\n3) Frissítéskeresést és telepítési műveleteket támogat a GUI-ból.\n4) Reboot státusz lekérdezésére is kísérletet tesz.\n\nFontos: a PSWindowsUpdate PowerShell Gallery modul, nem beépített Windows komponens. Kontrollált admin környezetben használd.",
-    "RecommendedAction": "Javasolt sorrend:\n1) Futtasd a Windows Update szolgáltatás-health checket.\n2) Készíts célzott KB vagy rendszer evidence csomagot.\n3) Ha szükséges, végezd el a cache vagy komponens-store javítást.\n4) Ezután indíts PSWindowsUpdate frissítéskeresést.\n5) Csak validált állapotban indíts telepítést.\n6) Telepítés után ellenőrizd a reboot státuszt és a Windows Update history-t.\n\nÉles vállalati környezetben előbb dokumentáld, hogy PowerShell Gallery modul használata engedélyezett-e.",
-    "ToolTip": "PSWindowsUpdate telepítés/import ellenőrzés, majd frissítéskeresés és telepítés támogatása.",
-    "ExpectedOutput": "Modultelepítési/import log és update query eredmény.",
-    "Impact": "Medium: modultelepítés és Windows Update API-hívások történhetnek.",
-    "DetailedSteps": "Javasolt sorrend:\n1) Futtasd a Windows Update szolgáltatás-health checket.\n2) Készíts célzott KB vagy rendszer evidence csomagot.\n3) Ha szükséges, végezd el a cache vagy komponens-store javítást.\n4) Ezután indíts PSWindowsUpdate frissítéskeresést.\n5) Csak validált állapotban indíts telepítést.\n6) Telepítés után ellenőrizd a reboot státuszt és a Windows Update history-t.\n\nÉles vállalati környezetben előbb dokumentáld, hogy PowerShell Gallery modul használata engedélyezett-e."
+    "Summary": "PSWindowsUpdate integráció.\n\nMit csinál:\n1) Ellenőrzi a PSWindowsUpdate modult.\n2) Frissítéseket kereshet.\n3) Frissítéseket telepíthet jóváhagyás után.\n\nFontos: a modul PowerShell Gallery forrásból származik, ezért vállalati környezetben előzetes jóváhagyás javasolt.",
+    "RecommendedAction": "Javasolt lépések:\n1) Előbb szolgáltatás-health check.\n2) Utána LOG csomag.\n3) Szükség esetén cache vagy komponens-store javítás.\n4) Frissítéskeresés.\n5) Telepítés.\n6) Reboot státusz ellenőrzése.",
+    "DetailedSteps": "Javasolt lépések:\n1) Előbb szolgáltatás-health check.\n2) Utána LOG csomag.\n3) Szükség esetén cache vagy komponens-store javítás.\n4) Frissítéskeresés.\n5) Telepítés.\n6) Reboot státusz ellenőrzése.",
+    "ToolTip": "PSWindowsUpdate integráció.",
+    "ExpectedOutput": "JSONL futási log",
+    "Impact": "Medium: rendszerjavító művelet."
   }
 }

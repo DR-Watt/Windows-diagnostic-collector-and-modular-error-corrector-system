@@ -1,9 +1,9 @@
 {
   "SchemaVersion": "diagframework.ui.v1",
   "Culture": "hu-HU",
-  "GeneratedForVersion": "1.2.1",
+  "GeneratedForVersion": "1.2.9",
   "Window": {
-    "Title": "Windows 11 Update Repair - DiagFramework v1.2.1 Strukturált AI LOG Pack"
+    "Title": "Windows 11 Update Repair - DiagFramework v1.2.9 UI Scope & System Log"
   },
   "Controls": {
     "btnReloadModules": {
@@ -34,34 +34,38 @@
       "Content": "Frissítések telepítése",
       "ToolTip": "PSWindowsUpdate használatával telepíti az elérhető frissítéseket. Újraindítást igényelhet."
     },
+    "chkSystemLogMode": {
+      "Content": "Rendszerszintű LOG csomag",
+      "ToolTip": "Bekapcsolva teljes rendszer evidence csomag készül. Kikapcsolva célzott KB csomag készül."
+    },
     "lblTargetKB": {
       "Text": "Célzott KB:",
-      "ToolTip": "A vizsgált frissítési azonosító, például KB5089573."
+      "ToolTip": "A vizsgált frissítési azonosító, például KB5089573. Rendszerszintű módban nem aktív."
     },
     "txtTargetKB": {
-      "ToolTip": "KB formátum: KB + legalább 6 számjegy. Példa: KB5089573."
+      "ToolTip": "KB formátum: KB + legalább 6 számjegy. Példa: KB5089573. Csak célzott KB módnál aktív."
     },
     "lblDaysBack": {
       "Text": "Napok:",
-      "ToolTip": "Ennyi napra visszamenőleg gyűjt eseményeket és naplókat."
+      "ToolTip": "Ennyi napra visszamenőleg gyűjt eseményeket és naplókat. Rendszerszintű LOG esetén ez a fő szűrő."
     },
     "txtDaysBack": {
       "ToolTip": "1 és 180 közötti érték. Alapértelmezés: 30."
     },
     "btnAiLogPackage": {
-      "Content": "AI LOG csomag készítése",
-      "ToolTip": "Célzott KB-hoz Windows Update, CBS, DISM, Panther, esemény és registry adatokat gyűjt. Nem javít rendszert."
+      "Content": "Célzott KB LOG csomag",
+      "ToolTip": "Csak célzott KB módban aktív. Windows Update / KB fókuszú, AI-barát evidence ZIP-et készít."
     },
     "btnEvidencePackage": {
       "Content": "Rendszer LOG csomag",
-      "ToolTip": "Általános Windows boot, setup, driver, crash, device setup és vendor diagnosztikai nyomokat gyűjt AI-elemzéshez. Hiba esetén is részleges csomagot készít."
+      "ToolTip": "Rendszerszintű módban aktív. Boot, driver, update, WER, CBS/DISM/Panther és vendor LOG evidence ZIP-et készít."
     },
     "btnOpenLogs": {
       "Content": "Logs mappa",
       "ToolTip": "Megnyitja a projekt logs könyvtárát."
     },
     "txtTopHint": {
-      "Text": "A LOG csomagok nem javítanak rendszert: strukturált ZIP-be gyűjtik a Windows Update, boot, driver, CBS/DISM/Panther, eseménynapló és registry bizonyítékokat. A logs gyökérben AI_README.md segíti a későbbi elemzést."
+      "Text": "A LOG csomagok nem javítanak rendszert: strukturált ZIP-be gyűjtik a Windows Update, boot, driver, CBS/DISM/Panther, eseménynapló és registry bizonyítékokat. Rendszerszintű módban a KB mező és a célzott KB gomb inaktív; célzott KB módban csak a KB LOG gomb aktív."
     },
     "grpModules": {
       "Header": "Modulok"
@@ -79,7 +83,7 @@
       "Header": "Használati megjegyzés"
     },
     "txtUsageNotes": {
-      "Text": "1. Futtasd a diagnosztikát.\n2. Hagyd bekapcsolva a WhatIf módot az első javítási próbakörben.\n3. KB5089573 típusú rollback hibánál először készíts AI LOG csomagot.\n4. Általános driver/boot/update anomáliánál készíts Rendszer LOG csomagot.\n5. Windows Update cache esetén a mappák átnevezésre kerülnek, nem törlésre.\n6. DISM/SFC hosszú ideig futhat; közben ne zárd be az ablakot."
+      "Text": "1. Válaszd ki, hogy rendszerszintű LOG-ot vagy célzott KB LOG-ot kérsz.\n2. Rendszerszintű LOG-nál a Napok mező a fő szűrő.\n3. Célzott KB módban add meg a KB azonosítót, például KB5089573.\n4. Futtasd a diagnosztikát.\n5. Első javítási körben hagyd bekapcsolva a WhatIf módot.\n6. DISM/SFC vagy cache reset előtt készíts evidence csomagot."
     },
     "txtStatus": {
       "Text": "Készen áll."
@@ -92,10 +96,10 @@
     "ConfirmRunTitle": "Megerősítés",
     "ConfirmRunBody": "Futtassam a kijelölt műveleteket?\n\nMód: {0}\nElemek: {1}",
     "ConfirmRollbackBody": "Rollback műveletet csak akkor futtass, ha egy javítás után regresszió jelentkezett. Folytatod?",
-    "DiagStart": "Diagnosztika indítása. TargetKB={0} DaysBack={1}",
+    "DiagStart": "Diagnosztika indítása. TargetKB={0} DaysBack={1} SystemMode={2}",
     "DiagComplete": "Diagnosztika kész. Talált javasolt elemek: {0}",
-    "Started": "DiagFramework Windows Update Repair v1.2.1 Structured AI Log Pack elindult.",
-    "AiLogDone": "AI LOG csomag elkészült:\n{0}",
+    "Started": "DiagFramework Windows Update Repair v1.2.9 elindult.",
+    "KbLogDone": "Célzott KB LOG csomag elkészült:\n{0}",
     "EvidenceLogDone": "Rendszer LOG csomag elkészült:\n{0}",
     "OpenLogsMissingCreated": "A logs mappa nem létezett, ezért létrehoztam."
   }
