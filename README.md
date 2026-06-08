@@ -1,280 +1,66 @@
-# DiagFramework Windows Update Repair MVP v1.2.4 — Bootstrap Output Hotfix
+# DiagFramework Windows Update Repair MVP v1.2.5 — Syntax Validator Safe Mode Hotfix
 
 ## Cél
 
-Ez a build a v1.2.3 bootstrap hibáját javítja: a környezeti diagnosztika `Write-EnvLog` függvénye korábban `Tee-Object` használata miatt success streamre is írt, ezért a validátor-wrapper több objektumot adott vissza, nem csak a JSON summary objektumot. Ennek következménye volt: `The property 'Failed' cannot be found on this object`.
+Ez a build a v1.2.4 bootstrap szintaxisvalidátor-hibáját javítja.
+
+A hiba:
+
+```text
+PowerShell szintaxisvalidátor futási hiba: Argument types do not match
+```
+
+A hiba nem a Windows Update javítólogikában, és nem a SystemEvidenceCollector gyűjtési folyamatában keletkezett, hanem a frissen beépített `validators\Validate-PowerShellSyntax.ps1` validátor saját `Parser.ParseFile()` hívásában.
 
 ## Javítás
 
-- `diagnostics/Initialize-DiagEnvironment.ps1`:
-  - `Write-EnvLog` most `Add-Content` + `Write-Host` mintát használ.
-  - `Invoke-JsonValidatorScript` JSON-kimenet feldolgozása robusztusabb.
-  - Kötelező validátor mezők ellenőrzése: `Failed`, `Valid`, `Checked`, `Results`.
-- A validátorok outputja már nem szennyeződik bootstrap log sorokkal.
+A `Validate-PowerShellSyntax.ps1` v1.2.5-ben nem használja a `Parser.ParseFile()` / `[ref]` out-paraméteres mintát. Helyette:
 
-## Futtatás
+```powershell
+$null = [scriptblock]::Create($content)
+```
+
+Ez a forráskódot szintaktikailag parse-olja, de nem hajtja végre.
+
+## Patch alkalmazása
+
+Csomagold ki a patch ZIP-et a repo gyökerébe felülírással:
+
+```text
+C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
+```
+
+Majd futtasd:
 
 ```powershell
 Set-Location C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
 .\diagnostics\Initialize-DiagEnvironment.ps1
+```
+
+Ha sikeres:
+
+```powershell
 .\install_and_run.bat
 ```
 
----
+Rendszer evidence csomag:
 
-# DiagFramework Windows Update Repair MVP v1.2.2 — Structured AI UI & System Evidence Hotfix
+```powershell
+.\tools\Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573
+```
 
-## v1.2.2 hotfix összefoglaló
+## Érintett fájl
 
-Ez a build a `SystemEvidenceCollector` hibaszigetelését javítja. A rendszer LOG csomag most már részleges adatforrás-hiba esetén is megpróbál `ai_summary.json`, `collector-progress.jsonl`, `errors/collector-errors.json`, `manifest.json`, `AI_README.md` és ZIP csomagot készíteni.
+```text
+validators\Validate-PowerShellSyntax.ps1
+```
 
-Új gyökérszintű AI útmutatók:
+## LOG gyökér AI dokumentáció
+
+A v1.2.x ágban továbbra is cél, hogy a rendszer LOG gyökerében és az evidence package mappákban AI számára értelmezhető magyarázó fájlok legyenek:
 
 ```text
 logs\AI_README.md
 logs\evidence_packages\AI_README.md
 logs\ai_packages\AI_README.md
 ```
-
-A gyűjtőmodul továbbra sem végez javítást, csak bizonyítékot gyűjt.
-
-
-## Cél
-
-PowerShell 7.x + WPF/XAML alapú Windows 11 diagnosztikai és javító keretrendszer, amely:
-
-- Windows Update telepítési hibákat vizsgál,
-- opcionális javításokat kínál felhasználói jóváhagyással,
-- célzott KB-frissítésekhez AI által elemezhető LOG csomagot készít,
-- általános boot/setup/driver/crash/vendor diagnosztikai bizonyítékcsomagot készít,
-- a GUI feliratait, tooltipjeit és fő üzeneteit külön strukturált JSON fájlban tartja,
-- a modulok magyarázó szövegeit a modul saját `manifest.json` fájljában tárolja.
-
-## v1.2.0 fő változások
-
-### 1. Strukturált UI erőforrásfájl
-
-Új fájl:
-
-```text
-config\ui.hu-HU.json
-```
-
-Ez tartalmazza:
-
-- ablakcímet,
-- gombfeliratokat,
-- címkéket,
-- tooltip szövegeket,
-- fő üzeneteket,
-- használati megjegyzést.
-
-### 2. Manifest-vezérelt modulmagyarázatok
-
-Minden modul manifestje tartalmazza az új `Ui` blokkot:
-
-```json
-{
-  "Ui": {
-    "Summary": "...",
-    "RecommendedAction": "...",
-    "ToolTip": "...",
-    "ExpectedOutput": "...",
-    "Impact": "..."
-  }
-}
-```
-
-A GUI ezeket használja az ÖSSZEFOGLALÓ és JAVASOLT MŰVELET panel feltöltéséhez.
-
-### 3. GUI elrendezés módosítása
-
-A modulok listája külön bal oldali táblában jelenik meg. Az ÖSSZEFOGLALÓ és JAVASOLT MŰVELET nem hosszú GridView oszlopként szerepel, hanem két külön, függőlegesen görgethető jobb oldali panelben.
-
-Ez hosszabb magyarázó szövegeknél kezelhetőbb.
-
-### 4. Új SystemEvidenceCollector modul
-
-Új modul:
-
-```text
-modules\SystemEvidenceCollector\SystemEvidenceCollector.ps1
-```
-
-Feladata:
-
-- System/Application/Setup eseménynaplók gyűjtése,
-- WindowsUpdateClient események gyűjtése,
-- Kernel-Boot, Kernel-PnP, DeviceSetupManager, DriverFrameworks események gyűjtése,
-- CBS/DISM/Panther/SetupAPI/WER/Minidump adatok másolása,
-- ismert gyártói diagnosztikai loghelyek gyűjtése: Dell, HP, Lenovo, Intel, NVIDIA, AMD,
-- driver snapshot mentése,
-- pending reboot registry állapot mentése,
-- `ai_summary.json`, `manifest.json`, `AI_README.md` és ZIP csomag készítése.
-
-A modul nem javít rendszert.
-
-### 5. Markdown CLEAN generálási log
-
-A CLEAN kódgenerálási log a továbbiakban Markdown formátumú:
-
-```text
-clean_generation_log.md
-```
-
-Ez egyben build log és fejlesztői changelog.
-
-## Követelmények
-
-- Windows 11
-- PowerShell 7.x (`pwsh.exe`)
-- Admin jogosultság
-- WPF futtatási környezet Windows alatt
-- Execution Policy: `RemoteSigned`, vagy a mellékelt `.bat` indítón keresztül `Bypass`
-
-## Indítás GUI-val
-
-```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
-.\install_and_run.bat
-```
-
-Vagy közvetlenül:
-
-```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
-.\diagnostics\Initialize-DiagEnvironment.ps1
-.\Launcher.ps1
-```
-
-## Célzott AI LOG gyűjtés KB5089573-hoz
-
-Admin PowerShell 7-ből:
-
-```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
-.\tools\Collect-AIPackage.ps1 -TargetKB KB5089573 -DaysBack 30
-```
-
-Vagy:
-
-```bat
-collect_ai_logs_for_kb5089573.bat
-```
-
-Csomag helye:
-
-```text
-logs\ai_packages\YYYYMMDD-HHMMSS-COMPUTER-KB5089573.zip
-```
-
-## Általános rendszer LOG / evidence csomag
-
-Admin PowerShell 7-ből:
-
-```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_0_structured_ai_ui
-.\tools\Collect-SystemEvidence.ps1 -DaysBack 30
-```
-
-Vagy:
-
-```bat
-collect_system_evidence.bat
-```
-
-Csomag helye:
-
-```text
-logs\evidence_packages\YYYYMMDD-HHMMSS-COMPUTER-SystemEvidence.zip
-```
-
-## Validátorok
-
-Manifest validáció:
-
-```powershell
-.\validators\Validate-Manifests.ps1
-```
-
-UI resource validáció:
-
-```powershell
-.\validators\Validate-UiResources.ps1
-```
-
-AI LOG csomag validáció:
-
-```powershell
-.\validators\Validate-AIPackage.ps1 -PackagePath .\logs\ai_packages\<package>.zip
-```
-
-## Biztonsági alapelv
-
-- A LOG gyűjtő modulok nem javítanak rendszert.
-- A Windows Update cache reset törlés helyett átnevezést használ.
-- Javító műveleteket először WhatIf módban célszerű futtatni.
-- DISM/SFC hosszú ideig futhat, és újraindítást igényelhet.
-
-## GitHub inputok
-
-A v1.2.0 átdolgozás tervezésénél figyelembe vett GitHub repók:
-
-- `DR-Watt/Windows-diagnostic-collector-and-modular-error-corrector-system`
-- `DR-Watt/WindowsRescue`
-- `DR-Watt/Windows-Repair-Tool`
-- `DR-Watt/Windows-Maintenance-Tool`
-- `DR-Watt/WindowsMaintenance`
-
-A külső repók nem lettek egy az egyben átmásolva; tervezési mintaként használtam őket: biztonságos mentés, interaktív javítás, DISM/SFC sorrend, GUI tooltip/preview szemlélet, opcionális agresszív műveletek.
-
-
-## v1.2.2 hotfix
-
-### Javítás
-
-A `SystemEvidenceCollector.ps1` modulban a `Convert-EventRecordFlat` függvény PowerShell parser-hibát okozhatott, mert a `[PSCustomObject]@{ ... }` objektumliterál értékei között közvetlen `try { } catch { }` szerkezet szerepelt.
-
-A v1.2.2-ben a védett eseménymező-kiolvasások a hashtable-literal előtt, külön változókba kerülnek, majd ezekből készül az objektum. Ez megszünteti a következő típusú hibát:
-
-```text
-Missing closing '}' in statement block or type definition.
-Unexpected token 'ProviderName' in expression or statement.
-```
-
-### Új validátor
-
-Új fájl:
-
-```text
-validators\Validate-PowerShellSyntax.ps1
-```
-
-A környezeti diagnosztika most már indításkor lefuttatja a PowerShell parser-alapú szintaxisellenőrzést a `.ps1` és `.psm1` fájlokon, így hasonló parse-hiba nem csak a GUI-gomb megnyomásakor derül ki.
-
-## v1.2.3 Validator Invocation Hotfix
-
-Ez a hotfix a környezeti diagnosztika PowerShell szintaxisvalidátorának indítását és a validator saját parser-hívását javítja.
-
-### Javított hiba
-
-Korábbi hiba:
-
-```text
-Validate-PowerShellSyntax.ps1: ... Initialize-DiagEnvironment.ps1:85
-Argument types do not match
-```
-
-A javítás két részből áll:
-
-1. `Validate-PowerShellSyntax.ps1`: explicit `[System.Management.Automation.Language.Token[]]` és `[System.Management.Automation.Language.ParseError[]]` referencia-változókat használ a `Parser.ParseFile()` híváshoz.
-2. `Initialize-DiagEnvironment.ps1`: a validátorokat külön JSON-kimenetként kezeli, nem keveri össze a JSON-t a PowerShell error streammel.
-
-### Kézi validálás
-
-```powershell
-Set-Location C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
-.\validators\Validate-PowerShellSyntax.ps1 -RootPath .
-.\diagnostics\Initialize-DiagEnvironment.ps1
-```
-
