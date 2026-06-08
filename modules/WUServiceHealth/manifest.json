@@ -8,10 +8,11 @@
   "Description": "Ellenőrzi és javítja a Windows Update, BITS és Cryptographic Services állapotát.",
   "Category": "Diagnostics",
   "Ui": {
-    "Summary": "A Windows Update alap szolgáltatásainak állapotát és indítási módját vizsgálja: wuauserv, bits, cryptsvc.",
-    "RecommendedAction": "Ha szolgáltatás letiltott vagy nem indítható, engedélyezd a javítást. Ez alapfeltétele a Windows Update működésének.",
+    "Summary": "A Windows Update működéséhez szükséges alapszolgáltatásokat ellenőrzi: wuauserv, BITS és cryptsvc. Megnézi az állapotukat és indítási módjukat, mert letiltott vagy hibás szolgáltatás esetén a frissítéskeresés, letöltés, hitelesítés vagy telepítés már a folyamat elején megakadhat.",
+    "RecommendedAction": "Ezt érdemes a javítási sorrend elején futtatni. Ha valamelyik szolgáltatás Disabled, hibás állapotú vagy nem indítható, előbb ezt javítsd, csak utána kezdj cache resetet vagy DISM/SFC javítást. Lépések: 1) diagnosztika, 2) szolgáltatás állapotának ellenőrzése, 3) jóváhagyott javítás, 4) új diagnosztika, 5) update keresés.",
     "ToolTip": "Windows Update szolgáltatás-health check és alap indítási mód visszaállítás.",
     "ExpectedOutput": "Szolgáltatás-státusz JSONL log és rollback state.",
-    "Impact": "Low-Medium: szolgáltatás indítási módokat módosíthat javításkor."
+    "Impact": "Low-Medium: szolgáltatás indítási módokat módosíthat javításkor.",
+    "DetailedSteps": "Ezt érdemes a javítási sorrend elején futtatni. Ha valamelyik szolgáltatás Disabled, hibás állapotú vagy nem indítható, előbb ezt javítsd, csak utána kezdj cache resetet vagy DISM/SFC javítást. Lépések: 1) diagnosztika, 2) szolgáltatás állapotának ellenőrzése, 3) jóváhagyott javítás, 4) új diagnosztika, 5) update keresés."
   }
 }

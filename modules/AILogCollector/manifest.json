@@ -8,10 +8,11 @@
   "Description": "Célzott Windows Update / KB hibaelemző LOG csomagot készít AI vagy külső szakértő számára. v1.1.1: JSON-truncation és útvonal-típushiba hotfix. Nem javít rendszert.",
   "Category": "EvidenceCollection",
   "Ui": {
-    "Summary": "Célzott Windows Update / KB hibaelemző bizonyítékcsomagot készít. Elsősorban kumulatív frissítések rollback vagy sikertelen telepítésének vizsgálatára való.",
-    "RecommendedAction": "Rollback vagy ismételt újraindítás után sikertelen KB esetén először ezt futtasd. A modul nem javít rendszert, csak AI/szakértő által elemezhető ZIP-et készít.",
+    "Summary": "Célzott Windows Update / KB hibaelemző bizonyítékcsomagot készít egy konkrét frissítéshez. A modul a Windows Update történetet, célzott KB-találatokat, WindowsUpdate.log konverziót, CBS/DISM/Panther/ReportingEvents logokat, releváns eseménynaplókat, pending reboot registry állapotot és hibakód-kivonatokat rendezi AI által olvasható ZIP-be. A modul nem javít és nem módosít rendszert; célja, hogy a javítás előtt meglegyen a bizonyítékalap.",
+    "RecommendedAction": "Akkor futtasd elsőként, ha egy konkrét KB — például KB5089573 — többszöri újraindítás vagy rollback után sem települ. Lépések: 1) írd be a célzott KB azonosítót, 2) állítsd be a vizsgált napok számát, 3) készíts AI LOG csomagot, 4) ellenőrizd az ai_summary.json és collector-progress.jsonl fájlokat, 5) csak ezután dönts cache reset, DISM/SFC vagy update újrapróbálás mellett. Külső megosztás előtt anonimizáld a gép- és felhasználóneveket.",
     "ToolTip": "Windows Update, CBS, DISM, Panther, eseménynapló, registry és update history adatok gyűjtése célzott KB-hoz.",
     "ExpectedOutput": "logs/ai_packages/<timestamp>-<computer>-<KB>.zip",
-    "Impact": "Low: olvasási/gyűjtési művelet, rendszerjavítást nem végez."
+    "Impact": "Low: olvasási/gyűjtési művelet, rendszerjavítást nem végez.",
+    "DetailedSteps": "Akkor futtasd elsőként, ha egy konkrét KB — például KB5089573 — többszöri újraindítás vagy rollback után sem települ. Lépések: 1) írd be a célzott KB azonosítót, 2) állítsd be a vizsgált napok számát, 3) készíts AI LOG csomagot, 4) ellenőrizd az ai_summary.json és collector-progress.jsonl fájlokat, 5) csak ezután dönts cache reset, DISM/SFC vagy update újrapróbálás mellett. Külső megosztás előtt anonimizáld a gép- és felhasználóneveket."
   }
 }

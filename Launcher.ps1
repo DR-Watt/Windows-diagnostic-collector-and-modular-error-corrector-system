@@ -273,7 +273,7 @@ function Run-Diagnostics {
                 Add-UiLog "Modul futtatása: $($m.Id) / Test-Condition"
                 $params = @{}
                 if ($m.Id -eq 'AILogCollector') { $params = @{ TargetKB = $targetKb; DaysBack = $daysBack } }
-                elseif ($m.Id -eq 'SystemEvidenceCollector') { $params = @{ DaysBack = $daysBack } }
+                elseif ($m.Id -eq 'SystemEvidenceCollector') { $params = @{ DaysBack = $daysBack; TargetKB = $targetKb } }
                 $result = Invoke-DiagModuleAction -Module $m -Action 'Test-Condition' -Parameters $params
                 $item = ConvertTo-ResultItem -Module $m -Result $result
                 [void]$script:CurrentItems.Add($item)
@@ -330,7 +330,7 @@ function Run-SelectedFixes {
                 Add-UiLog "Művelet futtatása: $($it.ModuleId) / Invoke-Fix / WhatIf=$($chkWhatIf.IsChecked)"
                 $params = @{}
                 if ($it.ModuleId -eq 'AILogCollector') { $params = @{ TargetKB = $targetKb; DaysBack = $daysBack } }
-                elseif ($it.ModuleId -eq 'SystemEvidenceCollector') { $params = @{ DaysBack = $daysBack } }
+                elseif ($it.ModuleId -eq 'SystemEvidenceCollector') { $params = @{ DaysBack = $daysBack; TargetKB = $targetKb } }
                 $res = Invoke-DiagModuleAction -Module $it.RawModule -Action 'Invoke-Fix' -WhatIf:$chkWhatIf.IsChecked -Parameters $params
                 Add-UiLog (($res | ConvertTo-Json -Depth 12))
                 if ($res.PSObject.Properties['ZipPath']) { Add-UiLog "ZIP elkészült: $($res.ZipPath)" }

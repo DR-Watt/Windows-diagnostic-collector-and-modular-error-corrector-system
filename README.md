@@ -1,76 +1,58 @@
-# DiagFramework Windows Update Repair MVP v1.2.5 — Syntax Validator Safe Mode Hotfix
+# DiagFramework Windows Update Repair MVP v1.2.7 — System Evidence Resilience & UI Detail Pack
 
 ## Cél
 
-Ez a build a v1.2.4 bootstrap szintaxisvalidátor-hibáját javítja.
+PowerShell 7.x + WPF/XAML alapú Windows 11 diagnosztikai és javító keretrendszer. A v1.2.7 célja, hogy a rendszer LOG csomag akkor is elemezhető maradjon, ha egyes adatforrások — például registry pending reboot, driver snapshot vagy eseménynapló — futás közben hibát adnak.
 
-A hiba:
+## Fő változások v1.2.7-ben
 
-```text
-PowerShell szintaxisvalidátor futási hiba: Argument types do not match
-```
+- `SystemEvidenceCollector.ps1` runtime resilience hotfix.
+- `SystemEvidenceCollector` verzió: `1.2.7`.
+- Generikus `System.Collections.Generic.List[object]` használat eltávolítva a rendszer evidence gyűjtés kritikus útjából.
+- A registry, driver és eseménynapló szakaszok natív PowerShell tömböket és laposított objektumokat használnak.
+- A collector minden fő lépés után írja a `collector-progress.jsonl` állományt.
+- Részleges hiba esetén `Partial` státuszú csomagot készít `ai_summary.json`, `AI_README.md` és `errors/collector-errors.json` fájlokkal.
+- A GUI `ÖSSZEFOGLALÓ` és `JAVASOLT MŰVELET` szövegei részletesebb, lépésenként értelmezhető manifest szövegeket kaptak.
+- A GUI most a célzott KB mezőt a `SystemEvidenceCollector` modulnak is átadja.
 
-A hiba nem a Windows Update javítólogikában, és nem a SystemEvidenceCollector gyűjtési folyamatában keletkezett, hanem a frissen beépített `validators\Validate-PowerShellSyntax.ps1` validátor saját `Parser.ParseFile()` hívásában.
-
-## Javítás
-
-A `Validate-PowerShellSyntax.ps1` v1.2.5-ben nem használja a `Parser.ParseFile()` / `[ref]` out-paraméteres mintát. Helyette:
-
-```powershell
-$null = [scriptblock]::Create($content)
-```
-
-Ez a forráskódot szintaktikailag parse-olja, de nem hajtja végre.
-
-## Patch alkalmazása
-
-Csomagold ki a patch ZIP-et a repo gyökerébe felülírással:
-
-```text
-C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
-```
-
-Majd futtasd:
+## Indítás
 
 ```powershell
 Set-Location C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
-.\diagnostics\Initialize-DiagEnvironment.ps1
-```
-
-Ha sikeres:
-
-```powershell
 .\install_and_run.bat
 ```
 
-Rendszer evidence csomag:
+## Rendszer LOG csomag készítése
 
 ```powershell
-.\tools\Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573
+.	ools\Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573
 ```
 
-## Érintett fájl
+## Fontos fájlok a rendszer LOG csomagban
 
 ```text
-validators\Validate-PowerShellSyntax.ps1
+AI_README.md
+ai_summary.json
+collector-progress.jsonl
+errors\collector-errors.json
+events\event-summary.json
+registryeboot-pending.json
+drivers\pnp-signed-drivers.json
+copied_logs\copied-files.json
+commands
+ative-command-results.json
+manifest.json
 ```
 
-## LOG gyökér AI dokumentáció
+## Elemzési javaslat AI számára
 
-A v1.2.x ágban továbbra is cél, hogy a rendszer LOG gyökerében és az evidence package mappákban AI számára értelmezhető magyarázó fájlok legyenek:
+1. `AI_README.md`
+2. `ai_summary.json`
+3. `collector-progress.jsonl`
+4. `errors/collector-errors.json`
+5. `events/event-summary.json`
+6. CBS/DISM/Panther/SetupAPI/WER és vendor logok.
 
-```text
-logs\AI_README.md
-logs\evidence_packages\AI_README.md
-logs\ai_packages\AI_README.md
-```
+## Korlát
 
-## v1.2.6 hotfix – PowerShell syntax validator non-blocking bootstrap
-
-A v1.2.6 javítás célja, hogy a PowerShell szintaxisvalidátor saját belső hibája ne blokkolja a teljes programindítást. A tényleges fájlszintű PowerShell szintaktikai hibák továbbra is blokkoló hibák. Ha viszont maga a validátor fut bele környezeti vagy típuskötési hibába, a rendszer `WARNING` státusszal folytatja, és a részleteket a `logs\syntax-validator-internal-warning-*.json` fájlba írja.
-
-Érintett fájlok:
-
-- `validators\Validate-PowerShellSyntax.ps1`
-- `diagnostics\Initialize-DiagEnvironment.ps1`
-
+A csomagot a build környezetben nem tudtam Windows 11 PowerShell 7.6.2 runtime alatt futtatni. A kliensen a környezeti validáció már lefutott; a v1.2.7 fő célja a `SystemEvidenceCollector` futásidejű hibatűrésének javítása.

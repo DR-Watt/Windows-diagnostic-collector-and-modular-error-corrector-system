@@ -8,10 +8,11 @@
   "Description": "DISM CheckHealth/RestoreHealth és SFC scannow a komponens-store és rendszerfájlhibák javítására.",
   "Category": "Repair",
   "Ui": {
-    "Summary": "A Windows komponens-store állapotát vizsgálja DISM CheckHealth segítségével, javításkor DISM RestoreHealth és SFC scannow műveletet futtat.",
-    "RecommendedAction": "Komponens-store sérülés vagy CBS/DISM hibák esetén WhatIf után, tudatos jóváhagyással futtasd. Internet vagy megfelelő repair source szükséges lehet.",
+    "Summary": "A Windows komponens-store és védett rendszerfájlok javítására szolgáló modul. Diagnosztikánál a DISM CheckHealth jelzi, hogy az image egészséges, javítható vagy sérült állapotban van-e. Javításkor a DISM RestoreHealth a komponens-store helyreállítását végzi, majd az SFC /scannow az egyedi védett rendszerfájlokat ellenőrzi és javítja. Ez a Windows Update hibák mögötti CBS/DISM típusú sérülések kezelésére való.",
+    "RecommendedAction": "Akkor használd, ha a LOG csomag CBS/DISM hibákat, komponens-store sérülést, 0x800f... jellegű servicing hibát vagy sikertelen kumulatív update integrációt mutat. Javasolt sorrend: 1) AI LOG csomag készítése, 2) DISM CheckHealth/ScanHealth állapotértelmezés, 3) RestoreHealth futtatása, 4) SFC futtatása, 5) újraindítás, 6) Windows Update újrapróbálás. Offline vagy korlátozott hálózat esetén repair source megadása válhat szükségessé.",
     "ToolTip": "DISM /Online /Cleanup-Image /CheckHealth, RestoreHealth és SFC munkafolyamat.",
     "ExpectedOutput": "JSONL futási log + DISM/SFC parancskimenet.",
-    "Impact": "Medium: rendszerjavító művelet, hosszú futás és újraindítási igény előfordulhat."
+    "Impact": "Medium: rendszerjavító művelet, hosszú futás és újraindítási igény előfordulhat.",
+    "DetailedSteps": "Akkor használd, ha a LOG csomag CBS/DISM hibákat, komponens-store sérülést, 0x800f... jellegű servicing hibát vagy sikertelen kumulatív update integrációt mutat. Javasolt sorrend: 1) AI LOG csomag készítése, 2) DISM CheckHealth/ScanHealth állapotértelmezés, 3) RestoreHealth futtatása, 4) SFC futtatása, 5) újraindítás, 6) Windows Update újrapróbálás. Offline vagy korlátozott hálózat esetén repair source megadása válhat szükségessé."
   }
 }

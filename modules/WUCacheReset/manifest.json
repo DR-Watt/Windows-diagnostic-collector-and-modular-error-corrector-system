@@ -8,10 +8,11 @@
   "Description": "SoftwareDistribution és catroot2 átnevezéses reset, szolgáltatás stop/start műveletekkel.",
   "Category": "Repair",
   "Ui": {
-    "Summary": "A Windows Update cache állapotát vizsgálja, javításkor a SoftwareDistribution és catroot2 komponenseket törlés helyett időbélyegzett backup névre átnevezi.",
-    "RecommendedAction": "Letöltési/installációs cache-hiba, beragadt update vagy ismételt rollback után futtasd, előtte AI LOG csomag készítése javasolt.",
+    "Summary": "Rollback-barát Windows Update cache reset modul. A SoftwareDistribution és catroot2 állapotát kezeli, de törlés helyett időbélyegzett mentési névre átnevez, így a művelet nyoma és visszaállítási lehetősége megmarad. A művelet a BITS, Windows Update és Cryptographic Services szolgáltatások kontrollált stop/start ciklusával dolgozik.",
+    "RecommendedAction": "Akkor futtasd, ha a LOG-ok letöltési cache, beragadt update, újra és újra ugyanott elakadó telepítés vagy Windows Update adatbázis/cache problémát jeleznek. Javasolt lépések: 1) AI LOG csomag készítése, 2) WhatIf ellenőrzés, 3) cache reset jóváhagyása, 4) reboot, 5) frissítés újrakeresése. Ne használd első lépésként bizonyítékgyűjtés nélkül, mert a cache átnevezés után a korábbi állapot nehezebben értelmezhető.",
     "ToolTip": "BITS/WUAUSERV/CRYPTSVC stop-start, cache mappák átnevezése, rollback-barát állapotmentéssel.",
     "ExpectedOutput": "Átnevezett cache mappák + rollback state JSON.",
-    "Impact": "Medium: Windows Update komponensek átmenetileg leállnak, cache újraépül."
+    "Impact": "Medium: Windows Update komponensek átmenetileg leállnak, cache újraépül.",
+    "DetailedSteps": "Akkor futtasd, ha a LOG-ok letöltési cache, beragadt update, újra és újra ugyanott elakadó telepítés vagy Windows Update adatbázis/cache problémát jeleznek. Javasolt lépések: 1) AI LOG csomag készítése, 2) WhatIf ellenőrzés, 3) cache reset jóváhagyása, 4) reboot, 5) frissítés újrakeresése. Ne használd első lépésként bizonyítékgyűjtés nélkül, mert a cache átnevezés után a korábbi állapot nehezebben értelmezhető."
   }
 }

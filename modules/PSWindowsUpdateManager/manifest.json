@@ -8,10 +8,11 @@
   "Description": "Ellenőrzi/telepíti a PSWindowsUpdate modult, majd a GUI-ból frissítéskeresés és telepítés indítható.",
   "Category": "UpdateManagement",
   "Ui": {
-    "Summary": "A PSWindowsUpdate modul meglétét és használhatóságát kezeli Windows Update kereséshez és telepítéshez.",
-    "RecommendedAction": "Frissítéskeresés/telepítés előtt ellenőrizd a modult. Harmadik féltől származó PowerShell Gallery modul, ezért kontrollált környezetben használd.",
+    "Summary": "A Windows Update keresés és telepítés PowerShellből történő vezérlését segítő integráció. A PSWindowsUpdate modul meglétét ellenőrzi, szükség esetén telepíti/importálja, majd frissítéskeresési és telepítési műveletekhez használható. Ez nem Microsoft beépített Windows komponens, hanem PowerShell Gallery modul, ezért kontrollált admin környezetben érdemes használni.",
+    "RecommendedAction": "Frissítés telepítése előtt ellenőrizd, hogy a Windows Update szolgáltatások rendben vannak-e és készült-e LOG csomag. Használati sorrend: 1) szolgáltatás-health check, 2) célzott KB vagy rendszer evidence gyűjtés, 3) opcionális cache/komponens-store javítás, 4) PSWindowsUpdate keresés, 5) telepítés, 6) reboot státusz ellenőrzés. Éles környezetben dokumentáld, hogy PowerShell Gallery modul használata engedélyezett-e.",
     "ToolTip": "PSWindowsUpdate telepítés/import ellenőrzés, majd frissítéskeresés és telepítés támogatása.",
     "ExpectedOutput": "Modultelepítési/import log és update query eredmény.",
-    "Impact": "Medium: modultelepítés és Windows Update API-hívások történhetnek."
+    "Impact": "Medium: modultelepítés és Windows Update API-hívások történhetnek.",
+    "DetailedSteps": "Frissítés telepítése előtt ellenőrizd, hogy a Windows Update szolgáltatások rendben vannak-e és készült-e LOG csomag. Használati sorrend: 1) szolgáltatás-health check, 2) célzott KB vagy rendszer evidence gyűjtés, 3) opcionális cache/komponens-store javítás, 4) PSWindowsUpdate keresés, 5) telepítés, 6) reboot státusz ellenőrzés. Éles környezetben dokumentáld, hogy PowerShell Gallery modul használata engedélyezett-e."
   }
 }

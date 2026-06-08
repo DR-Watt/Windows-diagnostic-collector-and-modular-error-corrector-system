@@ -5,8 +5,9 @@
 .DESCRIPTION
   Nem javít rendszert. Strukturált, AI által elemezhető ZIP csomagot készít
   boot, setup, driver, update, crash és ismert gyártói diagnosztikai nyomokból.
-  v1.2.2: PowerShell parser-hiba javítás a Convert-EventRecordFlat függvényben,
-  valamint előindítási PowerShell szintaxisvalidátor.
+  v1.2.7: runtime resilience hotfix. A gyűjtő lépések natív PowerShell tömböket
+  és laposított objektumokat használnak, a fő gyűjtés végzetes alhibák esetén is
+  részleges csomagot, AI_README-t, ai_summary.json-t és collector-errors.json-t készít.
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +23,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ModuleId = 'SystemEvidenceCollector'
-$ModuleVersion = '1.2.2'
+$ModuleVersion = '1.2.7'
 
 function Get-Metadata {
     [PSCustomObject]@{
@@ -44,7 +45,13 @@ function New-DirectorySafe {
 function ConvertTo-SafeString {
     param([AllowNull()]$Value)
     if ($null -eq $Value) { return $null }
-    try { return [string]$Value } catch { return '<UnserializableValue>' }
+    try {
+        if ($Value -is [array]) {
+            return (@($Value) | ForEach-Object { ConvertTo-SafeString -Value $_ }) -join '; '
+        }
+        return [string]$Value
+    }
+    catch { return '<UnserializableValue>' }
 }
 
 function Get-RelativePathSafe {
@@ -59,7 +66,7 @@ function Get-RelativePathSafe {
         $base = [string]$BasePath
         $full = [string]$FullPath
         if ($full.StartsWith($base, [System.StringComparison]::OrdinalIgnoreCase)) {
-            return $full.Substring($base.Length).TrimStart([char[]]@('\\','/'))
+            return $full.Substring($base.Length).TrimStart([char[]]@('\','/'))
         }
         return Split-Path -Path $full -Leaf
     }
@@ -83,7 +90,7 @@ function Write-JsonSafe {
             JsonSerializationFailed = $true
             Error = $_.Exception.Message
             ObjectType = if ($null -ne $InputObject) { $InputObject.GetType().FullName } else { $null }
-            Text = ConvertTo-SafeString -Value $InputObject
+            Text = ConvertTo-SafeString -Value ($InputObject | Out-String)
         }
         $fallback | ConvertTo-Json -Depth 6 | Out-File -FilePath $Path -Encoding UTF8 -Force
     }
@@ -107,7 +114,7 @@ function Write-JsonLinesSafe {
                 TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
                 Error = $_.Exception.Message
                 ObjectType = if ($null -ne $item) { $item.GetType().FullName } else { $null }
-                Text = ConvertTo-SafeString -Value $item
+                Text = ConvertTo-SafeString -Value ($item | Out-String)
             } | ConvertTo-Json -Depth 6 -Compress | Out-File -FilePath $Path -Encoding UTF8 -Append
         }
     }
@@ -136,20 +143,30 @@ function Add-ProgressEvent {
 
 function Add-CollectorError {
     param(
-        [Parameter(Mandatory)]$Errors,
+        [Parameter(Mandatory)][object[]]$CurrentErrors,
         [Parameter(Mandatory)][string]$Step,
         [Parameter(Mandatory)][string]$Error,
         [string]$Target = '',
-        [string]$Category = ''
+        [string]$Category = '',
+        [string]$ScriptStackTrace = ''
     )
-    $Errors.Add([PSCustomObject]@{
+    $CurrentErrors + [PSCustomObject]@{
         SchemaVersion = 'diagframework.collector.error.v1'
         TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
         Step = $Step
         Target = $Target
         Category = $Category
         Error = $Error
-    }) | Out-Null
+        ScriptStackTrace = $ScriptStackTrace
+    }
+}
+
+function Write-CollectorErrorsSafe {
+    param(
+        [Parameter(Mandatory)][string]$PackageRoot,
+        [Parameter(Mandatory)][object[]]$Errors
+    )
+    Write-JsonSafe -InputObject @($Errors) -Path (Join-Path $PackageRoot 'errors/collector-errors.json') -Depth 8
 }
 
 function Write-LogRootReadmes {
@@ -261,6 +278,7 @@ A csomagot egy olvasó jellegű gyűjtőmodul készíti. Nem futtat javítást, 
 ## Állapotértelmezés
 - `Complete`: a fő csomagképzés lefutott.
 - `Partial`: egy vagy több adatforrás hibázott, de a csomag elemzésre alkalmas.
+- `FatalPartial`: végzetes részhiba történt, de a modul megpróbált csomagot és hibaösszefoglalót készíteni.
 - `InProgress`: a fájl a futás korai szakaszában készült, és később frissülhet.
 
 ## Adatvédelmi megjegyzés
@@ -271,9 +289,6 @@ A csomag gépnevet, felhasználónevet, eszköz- és driveradatokat, valamint ú
 function Convert-EventRecordFlat {
     param([Parameter(Mandatory)]$Event)
 
-    # PowerShell hashtable literals cannot safely use a raw try/catch statement as a value
-    # expression in all parser contexts. Keep all guarded reads outside the PSCustomObject
-    # literal so the module can be parsed before any event data is collected.
     $timeCreated = $null
     $providerName = $null
     $logName = $null
@@ -283,25 +298,20 @@ function Convert-EventRecordFlat {
     $recordId = $null
     $taskDisplayName = $null
     $opcodeDisplayName = $null
-    $keywords = @()
+    $keywords = ''
     $message = '<MessageUnavailable>'
 
-    try {
-        if ($null -ne $Event.TimeCreated) {
-            $timeCreated = ([datetime]$Event.TimeCreated).ToString('o')
-        }
-    } catch { $timeCreated = $null }
-
-    try { $providerName = ConvertTo-SafeString -Value $Event.ProviderName } catch { $providerName = $null }
-    try { $logName = ConvertTo-SafeString -Value $Event.LogName } catch { $logName = $null }
-    try { if ($null -ne $Event.Id) { $eventId = [int]$Event.Id } } catch { $eventId = $null }
-    try { $levelDisplayName = ConvertTo-SafeString -Value $Event.LevelDisplayName } catch { $levelDisplayName = $null }
-    try { $machineName = ConvertTo-SafeString -Value $Event.MachineName } catch { $machineName = $null }
-    try { if ($null -ne $Event.RecordId) { $recordId = [int64]$Event.RecordId } } catch { $recordId = $null }
-    try { $taskDisplayName = ConvertTo-SafeString -Value $Event.TaskDisplayName } catch { $taskDisplayName = $null }
-    try { $opcodeDisplayName = ConvertTo-SafeString -Value $Event.OpcodeDisplayName } catch { $opcodeDisplayName = $null }
-    try { $keywords = @($Event.KeywordsDisplayNames | ForEach-Object { ConvertTo-SafeString -Value $_ }) } catch { $keywords = @() }
-    try { $message = ConvertTo-SafeString -Value $Event.Message } catch { $message = '<MessageUnavailable>' }
+    try { if ($null -ne $Event.TimeCreated) { $timeCreated = ([datetime]$Event.TimeCreated).ToString('o') } } catch { }
+    try { $providerName = ConvertTo-SafeString -Value $Event.ProviderName } catch { }
+    try { $logName = ConvertTo-SafeString -Value $Event.LogName } catch { }
+    try { if ($null -ne $Event.Id) { $eventId = [int]$Event.Id } } catch { }
+    try { $levelDisplayName = ConvertTo-SafeString -Value $Event.LevelDisplayName } catch { }
+    try { $machineName = ConvertTo-SafeString -Value $Event.MachineName } catch { }
+    try { if ($null -ne $Event.RecordId) { $recordId = [int64]$Event.RecordId } } catch { }
+    try { $taskDisplayName = ConvertTo-SafeString -Value $Event.TaskDisplayName } catch { }
+    try { $opcodeDisplayName = ConvertTo-SafeString -Value $Event.OpcodeDisplayName } catch { }
+    try { $keywords = ConvertTo-SafeString -Value $Event.KeywordsDisplayNames } catch { }
+    try { $message = ConvertTo-SafeString -Value $Event.Message } catch { }
 
     [PSCustomObject]@{
         TimeCreated = $timeCreated
@@ -325,56 +335,55 @@ function Copy-IfExists {
         [int64]$MaxBytes = 52428800,
         [int]$MaxFiles = 300
     )
-    if (-not (Test-Path -LiteralPath $Source)) { return $null }
+    if (-not (Test-Path -LiteralPath $Source)) { return @() }
     New-DirectorySafe -Path $DestinationRoot
     $item = Get-Item -LiteralPath $Source -ErrorAction Stop
+
     if ($item.PSIsContainer) {
         $target = Join-Path $DestinationRoot $item.Name
         New-DirectorySafe -Path $target
-        $copied = New-Object System.Collections.Generic.List[object]
         $count = 0
-        Get-ChildItem -LiteralPath $item.FullName -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | ForEach-Object {
-            if ($count -ge $MaxFiles) { return }
-            if ($_.Length -le $MaxBytes) {
-                $relative = Get-RelativePathSafe -BasePath $item.FullName -FullPath $_.FullName
+        $results = @()
+        $children = @(Get-ChildItem -LiteralPath $item.FullName -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+        foreach ($child in $children) {
+            if ($count -ge $MaxFiles) { break }
+            if ($child.Length -le $MaxBytes) {
+                $relative = Get-RelativePathSafe -BasePath $item.FullName -FullPath $child.FullName
                 $dest = Join-Path $target $relative
                 New-DirectorySafe -Path (Split-Path -Parent $dest)
-                Copy-Item -LiteralPath $_.FullName -Destination $dest -Force -ErrorAction SilentlyContinue
-                $copied.Add([PSCustomObject]@{ Source=$_.FullName; Destination=$dest; Length=$_.Length; LastWriteTime=$_.LastWriteTime.ToString('o') }) | Out-Null
+                Copy-Item -LiteralPath $child.FullName -Destination $dest -Force -ErrorAction SilentlyContinue
+                $results += [PSCustomObject]@{ Source=$child.FullName; Destination=$dest; Length=$child.Length; LastWriteTime=$child.LastWriteTime.ToString('o') }
                 $count++
             }
             else {
-                $copied.Add([PSCustomObject]@{ Source=$_.FullName; Skipped=$true; Reason='FileTooLarge'; Length=$_.Length }) | Out-Null
+                $results += [PSCustomObject]@{ Source=$child.FullName; Skipped=$true; Reason='FileTooLarge'; Length=$child.Length }
             }
         }
-        return @($copied)
+        return $results
     }
-    else {
-        if ($item.Length -gt $MaxBytes) {
-            return [PSCustomObject]@{ Source=$item.FullName; Skipped=$true; Reason='FileTooLarge'; Length=$item.Length }
-        }
-        $dest = Join-Path $DestinationRoot $item.Name
-        Copy-Item -LiteralPath $item.FullName -Destination $dest -Force -ErrorAction SilentlyContinue
-        return [PSCustomObject]@{ Source=$item.FullName; Destination=$dest; Length=$item.Length; LastWriteTime=$item.LastWriteTime.ToString('o') }
+
+    if ($item.Length -gt $MaxBytes) {
+        return @([PSCustomObject]@{ Source=$item.FullName; Skipped=$true; Reason='FileTooLarge'; Length=$item.Length })
     }
+    $dest = Join-Path $DestinationRoot $item.Name
+    Copy-Item -LiteralPath $item.FullName -Destination $dest -Force -ErrorAction SilentlyContinue
+    return @([PSCustomObject]@{ Source=$item.FullName; Destination=$dest; Length=$item.Length; LastWriteTime=$item.LastWriteTime.ToString('o') })
 }
 
 function Get-RegistryValuesFlat {
     param([Parameter(Mandatory)][string]$Path)
-    $values = New-Object System.Collections.Generic.List[object]
+    $values = @()
     try {
         $props = Get-ItemProperty -Path $Path -ErrorAction Stop
         foreach ($p in $props.PSObject.Properties) {
             if ($p.Name -like 'PS*') { continue }
-            $raw = $p.Value
-            $text = if ($raw -is [array]) { (@($raw) | ForEach-Object { ConvertTo-SafeString -Value $_ }) -join '; ' } else { ConvertTo-SafeString -Value $raw }
-            $values.Add([PSCustomObject]@{ Name=$p.Name; Value=$text }) | Out-Null
+            $values += [PSCustomObject]@{ Name=$p.Name; Value=(ConvertTo-SafeString -Value $p.Value) }
         }
     }
     catch {
-        $values.Add([PSCustomObject]@{ Name='__ERROR__'; Value=$_.Exception.Message }) | Out-Null
+        $values += [PSCustomObject]@{ Name='__ERROR__'; Value=$_.Exception.Message }
     }
-    return @($values)
+    return $values
 }
 
 function Get-RebootPendingSnapshot {
@@ -383,19 +392,22 @@ function Get-RebootPendingSnapshot {
         'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired',
         'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
     )
-    $result = New-Object System.Collections.Generic.List[object]
+    $result = @()
     foreach ($path in $checks) {
-        $exists = Test-Path $path
-        $result.Add([PSCustomObject]@{ Path=$path; Exists=$exists; Values=if ($exists) { Get-RegistryValuesFlat -Path $path } else { @() } }) | Out-Null
+        $exists = $false
+        try { $exists = [bool](Test-Path -LiteralPath $path) } catch { $exists = $false }
+        $values = @()
+        if ($exists) { $values = @(Get-RegistryValuesFlat -Path $path) }
+        $result += [PSCustomObject]@{ Path=$path; Exists=$exists; Values=$values }
     }
-    return @($result)
+    return $result
 }
 
 function Get-SystemSnapshot {
     $os = $null; $cs = $null; $bios = $null
-    try { $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop } catch { }
-    try { $cs = Get-CimInstance Win32_ComputerSystem -ErrorAction Stop } catch { }
-    try { $bios = Get-CimInstance Win32_BIOS -ErrorAction Stop } catch { }
+    try { $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop } catch { }
+    try { $cs = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop } catch { }
+    try { $bios = Get-CimInstance -ClassName Win32_BIOS -ErrorAction Stop } catch { }
     [PSCustomObject]@{
         ComputerName = $env:COMPUTERNAME
         UserName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -412,33 +424,34 @@ function Get-SystemSnapshot {
 }
 
 function Get-DriverSnapshot {
-    $items = New-Object System.Collections.Generic.List[object]
+    $items = @()
     try {
-        Get-CimInstance Win32_PnPSignedDriver -ErrorAction Stop | ForEach-Object {
-            $items.Add([PSCustomObject]@{
-                DeviceName = ConvertTo-SafeString -Value $_.DeviceName
-                Manufacturer = ConvertTo-SafeString -Value $_.Manufacturer
-                DriverProviderName = ConvertTo-SafeString -Value $_.DriverProviderName
-                DriverVersion = ConvertTo-SafeString -Value $_.DriverVersion
-                DriverDate = ConvertTo-SafeString -Value $_.DriverDate
-                InfName = ConvertTo-SafeString -Value $_.InfName
-                DeviceClass = ConvertTo-SafeString -Value $_.DeviceClass
-                IsSigned = $_.IsSigned
-                Signer = ConvertTo-SafeString -Value $_.Signer
-            }) | Out-Null
+        $drivers = @(Get-CimInstance -ClassName Win32_PnPSignedDriver -ErrorAction Stop)
+        foreach ($d in $drivers) {
+            $items += [PSCustomObject]@{
+                DeviceName = ConvertTo-SafeString -Value $d.DeviceName
+                Manufacturer = ConvertTo-SafeString -Value $d.Manufacturer
+                DriverProviderName = ConvertTo-SafeString -Value $d.DriverProviderName
+                DriverVersion = ConvertTo-SafeString -Value $d.DriverVersion
+                DriverDate = ConvertTo-SafeString -Value $d.DriverDate
+                InfName = ConvertTo-SafeString -Value $d.InfName
+                DeviceClass = ConvertTo-SafeString -Value $d.DeviceClass
+                IsSigned = ConvertTo-SafeString -Value $d.IsSigned
+                Signer = ConvertTo-SafeString -Value $d.Signer
+            }
         }
     }
     catch {
-        $items.Add([PSCustomObject]@{ Error = $_.Exception.Message }) | Out-Null
+        $items += [PSCustomObject]@{ Error = $_.Exception.Message }
     }
-    return @($items)
+    return $items
 }
 
 function Collect-Events {
     param(
         [Parameter(Mandatory)][string]$PackageRoot,
         [Parameter(Mandatory)][datetime]$StartTime,
-        [Parameter(Mandatory)]$Errors,
+        [Parameter(Mandatory)][object[]]$Errors,
         [int]$MaxEvents = 1200
     )
     $eventRoot = Join-Path $PackageRoot 'events'
@@ -456,28 +469,29 @@ function Collect-Events {
         'Microsoft-Windows-WHEA-Logger/Operational',
         'Microsoft-Windows-WER-SystemErrorReporting/Operational'
     )
-    $summary = New-Object System.Collections.Generic.List[object]
+    $summary = @()
+    $localErrors = @($Errors)
     foreach ($log in $logs) {
         $safe = ($log -replace '[\\/\:\*\?"\<\>\|]', '_')
         $outPath = Join-Path $eventRoot ($safe + '.jsonl')
         try {
             $rawEvents = @(Get-WinEvent -FilterHashtable @{ LogName=$log; StartTime=$StartTime } -MaxEvents $MaxEvents -ErrorAction Stop)
-            $flat = New-Object System.Collections.Generic.List[object]
+            $flat = @()
             foreach ($ev in $rawEvents) {
-                try { $flat.Add((Convert-EventRecordFlat -Event $ev)) | Out-Null }
-                catch { Add-CollectorError -Errors $Errors -Step 'EventFlatten' -Target $log -Error $_.Exception.Message -Category 'EventRecord' }
+                try { $flat += (Convert-EventRecordFlat -Event $ev) }
+                catch { $localErrors = @(Add-CollectorError -CurrentErrors $localErrors -Step 'EventFlatten' -Target $log -Error $_.Exception.Message -Category 'EventRecord' -ScriptStackTrace $_.ScriptStackTrace) }
             }
-            Write-JsonLinesSafe -InputObject @($flat) -Path $outPath
-            $summary.Add([PSCustomObject]@{ LogName=$log; Status='OK'; Count=$flat.Count; OutputFile=('events/' + $safe + '.jsonl') }) | Out-Null
+            Write-JsonLinesSafe -InputObject $flat -Path $outPath
+            $summary += [PSCustomObject]@{ LogName=$log; Status='OK'; Count=$flat.Count; OutputFile=('events/' + $safe + '.jsonl') }
         }
         catch {
             Write-JsonLinesSafe -InputObject @() -Path $outPath
-            $summary.Add([PSCustomObject]@{ LogName=$log; Status='Error'; Count=0; Error=$_.Exception.Message; OutputFile=('events/' + $safe + '.jsonl') }) | Out-Null
-            Add-CollectorError -Errors $Errors -Step 'EventLog' -Target $log -Error $_.Exception.Message -Category 'Get-WinEvent'
+            $summary += [PSCustomObject]@{ LogName=$log; Status='Error'; Count=0; Error=$_.Exception.Message; OutputFile=('events/' + $safe + '.jsonl') }
+            $localErrors = @(Add-CollectorError -CurrentErrors $localErrors -Step 'EventLog' -Target $log -Error $_.Exception.Message -Category 'Get-WinEvent' -ScriptStackTrace $_.ScriptStackTrace)
         }
     }
-    Write-JsonSafe -InputObject @($summary) -Path (Join-Path $eventRoot 'event-summary.json') -Depth 6
-    return @($summary)
+    Write-JsonSafe -InputObject $summary -Path (Join-Path $eventRoot 'event-summary.json') -Depth 6
+    [PSCustomObject]@{ Summary=$summary; Errors=$localErrors }
 }
 
 function Invoke-NativeCommandSafe {
@@ -491,23 +505,24 @@ function Invoke-NativeCommandSafe {
         $outFile = Join-Path $PackageRoot ('commands/' + $Name + '.txt')
         $errFile = Join-Path $PackageRoot ('commands/' + $Name + '.err.txt')
         $p = Start-Process -FilePath $File -ArgumentList ([string[]]$Args) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $outFile -RedirectStandardError $errFile -ErrorAction Stop
-        [PSCustomObject]@{ Name=$Name; ExitCode=$p.ExitCode; StdOut=$outFile; StdErr=$errFile; Args=$Args }
+        [PSCustomObject]@{ Name=$Name; ExitCode=$p.ExitCode; StdOut=$outFile; StdErr=$errFile; Args=(ConvertTo-SafeString -Value $Args) }
     }
     catch {
-        [PSCustomObject]@{ Name=$Name; Error=$_.Exception.Message; Args=$Args }
+        [PSCustomObject]@{ Name=$Name; Error=$_.Exception.Message; Args=(ConvertTo-SafeString -Value $Args) }
     }
 }
 
 function New-PackageManifestSafe {
     param([Parameter(Mandatory)][string]$PackageRoot)
-    $files = New-Object System.Collections.Generic.List[object]
-    Get-ChildItem -LiteralPath $PackageRoot -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+    $files = @()
+    $children = @(Get-ChildItem -LiteralPath $PackageRoot -File -Recurse -ErrorAction SilentlyContinue)
+    foreach ($child in $children) {
         try {
-            $files.Add([PSCustomObject]@{
-                RelativePath = Get-RelativePathSafe -BasePath $PackageRoot -FullPath $_.FullName
-                Length = $_.Length
-                LastWriteTime = $_.LastWriteTime.ToString('o')
-            }) | Out-Null
+            $files += [PSCustomObject]@{
+                RelativePath = Get-RelativePathSafe -BasePath $PackageRoot -FullPath $child.FullName
+                Length = $child.Length
+                LastWriteTime = $child.LastWriteTime.ToString('o')
+            }
         }
         catch { }
     }
@@ -518,7 +533,61 @@ function New-PackageManifestSafe {
         ModuleId=$ModuleId
         ModuleVersion=$ModuleVersion
         ComputerName=$env:COMPUTERNAME
-        Files=@($files)
+        Files=$files
+    }
+}
+
+function Invoke-CollectorStep {
+    param(
+        [Parameter(Mandatory)][string]$Step,
+        [Parameter(Mandatory)][string]$PackageRoot,
+        [Parameter(Mandatory)][scriptblock]$ScriptBlock,
+        [Parameter(Mandatory)][object[]]$Errors
+    )
+    try {
+        $result = & $ScriptBlock
+        Add-ProgressEvent -PackageRoot $PackageRoot -Step $Step -Status 'OK'
+        [PSCustomObject]@{ Result=$result; Errors=$Errors }
+    }
+    catch {
+        $newErrors = @(Add-CollectorError -CurrentErrors $Errors -Step $Step -Error $_.Exception.Message -Category $_.CategoryInfo.ToString() -ScriptStackTrace $_.ScriptStackTrace)
+        Add-ProgressEvent -PackageRoot $PackageRoot -Step $Step -Status 'Error' -Message $_.Exception.Message
+        [PSCustomObject]@{ Result=$null; Errors=$newErrors }
+    }
+}
+
+function New-SummaryObject {
+    param(
+        [string]$Status,
+        [string]$PackageRoot,
+        [string]$ZipPath,
+        [string]$TargetKB,
+        [int]$DaysBack,
+        [int]$MaxEvents,
+        [object[]]$EventSummary,
+        [object[]]$Copied,
+        [object[]]$NativeResults,
+        [object[]]$Errors,
+        [string]$FatalError = ''
+    )
+    [PSCustomObject]@{
+        SchemaVersion = 'diagframework.systemevidence.summary.v1'
+        ModuleId = $ModuleId
+        ModuleVersion = $ModuleVersion
+        Status = $Status
+        TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
+        ComputerName = $env:COMPUTERNAME
+        TargetKB = $TargetKB
+        DaysBack = $DaysBack
+        MaxEvents = $MaxEvents
+        PackageRoot = $PackageRoot
+        ZipPath = $ZipPath
+        EventLogCount = @($EventSummary).Count
+        CopiedRecordCount = @($Copied).Count
+        NativeCommandCount = @($NativeResults).Count
+        ErrorCount = @($Errors).Count
+        FatalError = $FatalError
+        Purpose = 'AI/szakértő által elemezhető Windows 11 rendszerbizonyíték-csomag boot, setup, driver, update, crash és vendor diagnosztikai hibákhoz.'
     }
 }
 
@@ -537,10 +606,10 @@ function Invoke-EvidenceCollection {
     foreach ($sub in 'meta','events','registry','copied_logs','drivers','commands','errors','vendor_logs') { New-DirectorySafe -Path (Join-Path $packageRoot $sub) }
     Write-PackageReadme -PackageRoot $packageRoot -TargetKB $TargetKB -Status 'InProgress'
 
-    $errors = New-Object System.Collections.Generic.List[object]
+    $errors = @()
     $eventSummary = @()
-    $copied = New-Object System.Collections.Generic.List[object]
-    $nativeResults = New-Object System.Collections.Generic.List[object]
+    $copied = @()
+    $nativeResults = @()
 
     Add-ProgressEvent -PackageRoot $packageRoot -Step 'Start' -Message "DaysBack=$DaysBack MaxEvents=$MaxEvents TargetKB=$TargetKB WhatIf=$($WhatIf.IsPresent)"
 
@@ -560,76 +629,94 @@ function Invoke-EvidenceCollection {
         return $summary
     }
 
-    $startTime = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
+    try {
+        $startTime = (Get-Date).AddDays(-1 * [Math]::Abs($DaysBack))
 
-    try { Write-JsonSafe -InputObject (Get-SystemSnapshot) -Path (Join-Path $packageRoot 'meta/system-info.json') -Depth 8; Add-ProgressEvent -PackageRoot $packageRoot -Step 'SystemSnapshot' } catch { Add-CollectorError -Errors $errors -Step 'SystemSnapshot' -Error $_.Exception.Message; Add-ProgressEvent -PackageRoot $packageRoot -Step 'SystemSnapshot' -Status 'Error' -Message $_.Exception.Message }
-    try { Write-JsonSafe -InputObject (Get-RebootPendingSnapshot) -Path (Join-Path $packageRoot 'registry/reboot-pending.json') -Depth 10; Add-ProgressEvent -PackageRoot $packageRoot -Step 'RegistryPendingReboot' } catch { Add-CollectorError -Errors $errors -Step 'RegistryPendingReboot' -Error $_.Exception.Message; Add-ProgressEvent -PackageRoot $packageRoot -Step 'RegistryPendingReboot' -Status 'Error' -Message $_.Exception.Message }
-    try { Write-JsonSafe -InputObject (Get-DriverSnapshot) -Path (Join-Path $packageRoot 'drivers/pnp-signed-drivers.json') -Depth 8; Add-ProgressEvent -PackageRoot $packageRoot -Step 'DriverSnapshot' } catch { Add-CollectorError -Errors $errors -Step 'DriverSnapshot' -Error $_.Exception.Message; Add-ProgressEvent -PackageRoot $packageRoot -Step 'DriverSnapshot' -Status 'Error' -Message $_.Exception.Message }
-    try { $eventSummary = Collect-Events -PackageRoot $packageRoot -StartTime $startTime -MaxEvents $MaxEvents -Errors $errors; Add-ProgressEvent -PackageRoot $packageRoot -Step 'EventLogs' -Message "Logs=$(@($eventSummary).Count)" } catch { Add-CollectorError -Errors $errors -Step 'EventLogs' -Error $_.Exception.Message; Add-ProgressEvent -PackageRoot $packageRoot -Step 'EventLogs' -Status 'Error' -Message $_.Exception.Message; $eventSummary=@() }
-
-    $copyTargets = @(
-        "$env:SystemRoot\Logs\CBS\CBS.log",
-        "$env:SystemRoot\Logs\DISM\dism.log",
-        "$env:SystemRoot\WindowsUpdate.log",
-        "$env:SystemRoot\SoftwareDistribution\ReportingEvents.log",
-        "$env:SystemRoot\Panther",
-        "$env:SystemRoot\INF\setupapi.dev.log",
-        "$env:SystemRoot\INF\setupapi.setup.log",
-        "$env:SystemRoot\Minidump",
-        "$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
-        "$env:ProgramData\Microsoft\Windows\WER\ReportQueue",
-        "$env:ProgramData\Dell",
-        "$env:ProgramData\HP",
-        "$env:ProgramData\Lenovo",
-        "$env:ProgramData\Intel",
-        "$env:ProgramData\NVIDIA Corporation",
-        "$env:ProgramData\AMD"
-    )
-    foreach ($target in $copyTargets) {
-        try {
-            $destRoot = if ($target -match 'ProgramData\\(Dell|HP|Lenovo|Intel|NVIDIA Corporation|AMD)') { Join-Path $packageRoot 'vendor_logs' } else { Join-Path $packageRoot 'copied_logs' }
-            $result = Copy-IfExists -Source $target -DestinationRoot $destRoot
-            if ($null -ne $result) { foreach ($r in @($result)) { $copied.Add($r) | Out-Null } }
+        $step = Invoke-CollectorStep -Step 'SystemSnapshot' -PackageRoot $packageRoot -Errors $errors -ScriptBlock {
+            $obj = Get-SystemSnapshot
+            Write-JsonSafe -InputObject $obj -Path (Join-Path $packageRoot 'meta/system-info.json') -Depth 8
+            $obj
         }
-        catch { Add-CollectorError -Errors $errors -Step 'CopyTarget' -Target $target -Error $_.Exception.Message }
-    }
-    Write-JsonSafe -InputObject @($copied) -Path (Join-Path $packageRoot 'copied_logs/copied-files.json') -Depth 8
-    Add-ProgressEvent -PackageRoot $packageRoot -Step 'CopyLogs' -Message "CopiedRecords=$($copied.Count)"
+        $errors = @($step.Errors)
 
-    $commands = @(
-        @{ Name='reagentc-info'; File='reagentc.exe'; Args=@('/info') },
-        @{ Name='bcdedit-enum-all'; File='bcdedit.exe'; Args=@('/enum','all') },
-        @{ Name='dism-packages'; File='dism.exe'; Args=@('/Online','/Get-Packages','/Format:Table') },
-        @{ Name='dism-checkhealth'; File='dism.exe'; Args=@('/Online','/Cleanup-Image','/CheckHealth') }
-    )
-    foreach ($cmd in $commands) {
-        $nr = Invoke-NativeCommandSafe -PackageRoot $packageRoot -Name ([string]$cmd.Name) -File ([string]$cmd.File) -Args ([string[]]$cmd.Args)
-        $nativeResults.Add($nr) | Out-Null
-    }
-    Write-JsonSafe -InputObject @($nativeResults) -Path (Join-Path $packageRoot 'commands/native-command-results.json') -Depth 6
-    Add-ProgressEvent -PackageRoot $packageRoot -Step 'NativeCommands' -Message "Commands=$($nativeResults.Count)"
+        $step = Invoke-CollectorStep -Step 'RegistryPendingReboot' -PackageRoot $packageRoot -Errors $errors -ScriptBlock {
+            $obj = @(Get-RebootPendingSnapshot)
+            Write-JsonSafe -InputObject $obj -Path (Join-Path $packageRoot 'registry/reboot-pending.json') -Depth 10
+            $obj
+        }
+        $errors = @($step.Errors)
 
-    Write-JsonSafe -InputObject @($errors) -Path (Join-Path $packageRoot 'errors/collector-errors.json') -Depth 8
+        $step = Invoke-CollectorStep -Step 'DriverSnapshot' -PackageRoot $packageRoot -Errors $errors -ScriptBlock {
+            $obj = @(Get-DriverSnapshot)
+            Write-JsonSafe -InputObject $obj -Path (Join-Path $packageRoot 'drivers/pnp-signed-drivers.json') -Depth 8
+            $obj
+        }
+        $errors = @($step.Errors)
+
+        try {
+            $eventResult = Collect-Events -PackageRoot $packageRoot -StartTime $startTime -MaxEvents $MaxEvents -Errors $errors
+            $eventSummary = @($eventResult.Summary)
+            $errors = @($eventResult.Errors)
+            Add-ProgressEvent -PackageRoot $packageRoot -Step 'EventLogs' -Status 'OK' -Message "Logs=$($eventSummary.Count)"
+        }
+        catch {
+            $errors = @(Add-CollectorError -CurrentErrors $errors -Step 'EventLogs' -Error $_.Exception.Message -Category $_.CategoryInfo.ToString() -ScriptStackTrace $_.ScriptStackTrace)
+            Add-ProgressEvent -PackageRoot $packageRoot -Step 'EventLogs' -Status 'Error' -Message $_.Exception.Message
+            $eventSummary = @()
+        }
+
+        $copyTargets = @(
+            "$env:SystemRoot\Logs\CBS\CBS.log",
+            "$env:SystemRoot\Logs\DISM\dism.log",
+            "$env:SystemRoot\WindowsUpdate.log",
+            "$env:SystemRoot\SoftwareDistribution\ReportingEvents.log",
+            "$env:SystemRoot\Panther",
+            "$env:SystemRoot\INF\setupapi.dev.log",
+            "$env:SystemRoot\INF\setupapi.setup.log",
+            "$env:SystemRoot\Minidump",
+            "$env:ProgramData\Microsoft\Windows\WER\ReportArchive",
+            "$env:ProgramData\Microsoft\Windows\WER\ReportQueue",
+            "$env:ProgramData\Dell",
+            "$env:ProgramData\HP",
+            "$env:ProgramData\Lenovo",
+            "$env:ProgramData\Intel",
+            "$env:ProgramData\NVIDIA Corporation",
+            "$env:ProgramData\AMD"
+        )
+        foreach ($target in $copyTargets) {
+            try {
+                $destRoot = if ($target -match 'ProgramData\\(Dell|HP|Lenovo|Intel|NVIDIA Corporation|AMD)') { Join-Path $packageRoot 'vendor_logs' } else { Join-Path $packageRoot 'copied_logs' }
+                $result = @(Copy-IfExists -Source $target -DestinationRoot $destRoot)
+                if ($result.Count -gt 0) { $copied += $result }
+            }
+            catch {
+                $errors = @(Add-CollectorError -CurrentErrors $errors -Step 'CopyTarget' -Target $target -Error $_.Exception.Message -Category $_.CategoryInfo.ToString() -ScriptStackTrace $_.ScriptStackTrace)
+            }
+        }
+        Write-JsonSafe -InputObject $copied -Path (Join-Path $packageRoot 'copied_logs/copied-files.json') -Depth 8
+        Add-ProgressEvent -PackageRoot $packageRoot -Step 'CopyLogs' -Message "CopiedRecords=$($copied.Count)"
+
+        $commands = @(
+            @{ Name='reagentc-info'; File='reagentc.exe'; Args=@('/info') },
+            @{ Name='bcdedit-enum-all'; File='bcdedit.exe'; Args=@('/enum','all') },
+            @{ Name='dism-packages'; File='dism.exe'; Args=@('/Online','/Get-Packages','/Format:Table') },
+            @{ Name='dism-checkhealth'; File='dism.exe'; Args=@('/Online','/Cleanup-Image','/CheckHealth') }
+        )
+        foreach ($cmd in $commands) {
+            $nativeResults += (Invoke-NativeCommandSafe -PackageRoot $packageRoot -Name ([string]$cmd.Name) -File ([string]$cmd.File) -Args ([string[]]$cmd.Args))
+        }
+        Write-JsonSafe -InputObject $nativeResults -Path (Join-Path $packageRoot 'commands/native-command-results.json') -Depth 6
+        Add-ProgressEvent -PackageRoot $packageRoot -Step 'NativeCommands' -Message "Commands=$($nativeResults.Count)"
+    }
+    catch {
+        $errors = @(Add-CollectorError -CurrentErrors $errors -Step 'FatalCollectorBody' -Error $_.Exception.Message -Category $_.CategoryInfo.ToString() -ScriptStackTrace $_.ScriptStackTrace)
+        Add-ProgressEvent -PackageRoot $packageRoot -Step 'FatalCollectorBody' -Status 'Error' -Message $_.Exception.Message
+    }
+
+    Write-CollectorErrorsSafe -PackageRoot $packageRoot -Errors $errors
 
     $status = if ($errors.Count -gt 0) { 'Partial' } else { 'Complete' }
-    $summary = [PSCustomObject]@{
-        SchemaVersion = 'diagframework.systemevidence.summary.v1'
-        ModuleId = $ModuleId
-        ModuleVersion = $ModuleVersion
-        Status = $status
-        TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
-        ComputerName = $env:COMPUTERNAME
-        TargetKB = $TargetKB
-        DaysBack = $DaysBack
-        MaxEvents = $MaxEvents
-        PackageRoot = $packageRoot
-        ZipPath = $zipPath
-        EventLogCount = @($eventSummary).Count
-        CopiedRecordCount = $copied.Count
-        NativeCommandCount = $nativeResults.Count
-        ErrorCount = $errors.Count
-        Purpose = 'AI/szakértő által elemezhető Windows 11 rendszerbizonyíték-csomag boot, setup, driver, update, crash és vendor diagnosztikai hibákhoz.'
-    }
+    $summary = New-SummaryObject -Status $status -PackageRoot $packageRoot -ZipPath $zipPath -TargetKB $TargetKB -DaysBack $DaysBack -MaxEvents $MaxEvents -EventSummary $eventSummary -Copied $copied -NativeResults $nativeResults -Errors $errors
     Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
     Write-PackageReadme -PackageRoot $packageRoot -TargetKB $TargetKB -Status $status
 
@@ -639,8 +726,8 @@ function Invoke-EvidenceCollection {
         Add-ProgressEvent -PackageRoot $packageRoot -Step 'Manifest' -Message "Files=$($manifest.Files.Count)"
     }
     catch {
-        Add-CollectorError -Errors $errors -Step 'Manifest' -Error $_.Exception.Message
-        Write-JsonSafe -InputObject @($errors) -Path (Join-Path $packageRoot 'errors/collector-errors.json') -Depth 8
+        $errors = @(Add-CollectorError -CurrentErrors $errors -Step 'Manifest' -Error $_.Exception.Message -Category $_.CategoryInfo.ToString() -ScriptStackTrace $_.ScriptStackTrace)
+        Write-CollectorErrorsSafe -PackageRoot $packageRoot -Errors $errors
         Add-ProgressEvent -PackageRoot $packageRoot -Step 'Manifest' -Status 'Error' -Message $_.Exception.Message
     }
 
@@ -650,9 +737,14 @@ function Invoke-EvidenceCollection {
         Add-ProgressEvent -PackageRoot $packageRoot -Step 'Zip' -Message $zipPath
     }
     catch {
-        Add-CollectorError -Errors $errors -Step 'Zip' -Error $_.Exception.Message
-        Write-JsonSafe -InputObject @($errors) -Path (Join-Path $packageRoot 'errors/collector-errors.json') -Depth 8
+        $errors = @(Add-CollectorError -CurrentErrors $errors -Step 'Zip' -Error $_.Exception.Message -Category $_.CategoryInfo.ToString() -ScriptStackTrace $_.ScriptStackTrace)
+        Write-CollectorErrorsSafe -PackageRoot $packageRoot -Errors $errors
         Add-ProgressEvent -PackageRoot $packageRoot -Step 'Zip' -Status 'Error' -Message $_.Exception.Message
+    }
+
+    if ($errors.Count -gt 0 -and $summary.Status -ne 'Partial') {
+        $summary = New-SummaryObject -Status 'Partial' -PackageRoot $packageRoot -ZipPath $zipPath -TargetKB $TargetKB -DaysBack $DaysBack -MaxEvents $MaxEvents -EventSummary $eventSummary -Copied $copied -NativeResults $nativeResults -Errors $errors
+        Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
     }
 
     return $summary
@@ -665,8 +757,8 @@ switch ($Action) {
             IssueDetected = $true
             FixAvailable = $true
             Severity = 'Info'
-            Summary = 'Rendszerbizonyíték-csomag készíthető boot, setup, driver, update és vendor diagnosztikai elemzéshez.'
-            RecommendedAction = 'Hibás frissítés, rollback, driver-összeférhetetlenség vagy gyártói diagnosztika után készíts LOG csomagot AI-elemzéshez.'
+            Summary = 'Rendszerbizonyíték-csomag készíthető boot, setup, driver, Windows Update, WER és gyártói diagnosztikai elemzéshez. A modul olvasási jellegű: célja a tényanyag összegyűjtése, nem a rendszer módosítása.'
+            RecommendedAction = 'Sikertelen KB telepítés, rollback, ismeretlen restart, drivergyanú vagy vendor diagnosztika után futtasd. Először hagyd bekapcsolva a WhatIf módot a GUI-ban, majd éles gyűjtésnél készíts ZIP-et. A kész csomagban elsőként az AI_README.md, ai_summary.json, collector-progress.jsonl és errors/collector-errors.json fájlokat kell olvasni.'
         }
     }
     'Invoke-Fix' { Invoke-EvidenceCollection -DaysBack $DaysBack -MaxEvents $MaxEvents -WhatIf:$WhatIf -TargetKB $TargetKB }

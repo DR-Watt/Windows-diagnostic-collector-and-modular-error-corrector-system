@@ -1,75 +1,70 @@
-# CLEAN Generation Log / Changelog — DiagFramework v1.2.6 Syntax Validator Non-Blocking Hotfix
+# CLEAN Generation Log / Changelog
 
-## Build metadata
+## Build
 
-- Project: `Windows-diagnostic-collector-and-modular-error-corrector-system`
-- Build version: `v1.2.6`
-- Build name: `syntax_validator_nonblocking`
-- Generated at: `2026-06-08T11:18:00+02:00`
-- Target platform: Windows 11, PowerShell 7.x
-- Package type: CLEAN hotfix build
+- Project: DiagFramework Windows Update Repair MVP
+- Version: v1.2.7-system-evidence-resilience-ui-details
+- Generated: 2026-06-08T09:34:42.504380+00:00
+- Format: Markdown
 
-## Purpose
+## Trigger
 
-A v1.2.5 buildben a PowerShell szintaxisvalidátor már JSON választ adott, de a kliensgépen továbbra is `ValidatorInternalError: Argument types do not match` belső hibát jelzett. Emiatt a bootstrap blokkolta a GUI indítását, noha ez nem bizonyított tényleges forráskód-szintaktikai hiba volt.
+A validáció végre lefutott, de a `SystemEvidenceCollector` rendszer LOG csomag futás közben ismét hibába futott. A feltöltött `collector-progress.jsonl` szerint a `RegistryPendingReboot`, `DriverSnapshot` és `EventLogs` lépések `Argument types do not match` hibát adtak. A felhasználó kérte, hogy az `ÖSSZEFOGLALÓ` és `JAVASOLT MŰVELET` panelek részletesebb, lépésmagyarázó szöveget kapjanak.
 
-A v1.2.6 célja:
+## Root cause inference
 
-1. a `Validate-PowerShellSyntax.ps1` további egyszerűsítése,
-2. a validátor belső hibájának elkülönítése a tényleges fájlszintű szintaktikai hibától,
-3. a bootstrap folytatása warning mellett, ha csak a validátor saját belső hibája jelentkezik,
-4. a részletek AI-barát JSON fájlba mentése.
+A hiba nem PowerShell szintaxisprobléma: a `environment-20260608-112419.log` szerint a manifest, UI resource és PowerShell szintaxisvalidáció sikeresen lefutott. A futásidejű hiba a rendszer evidence collector belső adatgyűjtő/JSON-szerializáló útvonalán jelent meg. A v1.2.7 ezért eltávolítja a kritikus útból a generikus `System.Collections.Generic.List[object]` szerkezeteket, laposabb objektumokat használ, és részleges hiba esetén is csomagot készít.
 
 ## Modified files
 
-| File | Change |
-|---|---|
-| `validators/Validate-PowerShellSyntax.ps1` | v1.2.6 Safe/Non-blocking compatible validator. Nincs `Parser.ParseFile`, nincs generic list, nincs `Set-StrictMode`, egyszerűbb `ScriptBlock.Create` alapú parse. |
-| `diagnostics/Initialize-DiagEnvironment.ps1` | A syntax validator `InternalError=true` eredménye warningként kezelődik. Tényleges fájlszintű syntax error továbbra is blokkol. |
-| `README.md` | v1.2.6 hotfix leírás hozzáadva. |
-| `clean_generation_log.md` | Markdown changelog/build log frissítve. |
+- `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
+- `modules/SystemEvidenceCollector/manifest.json`
+- `modules/AILogCollector/manifest.json`
+- `modules/ComponentStoreRepair/manifest.json`
+- `modules/PSWindowsUpdateManager/manifest.json`
+- `modules/WUCacheReset/manifest.json`
+- `modules/WUServiceHealth/manifest.json`
+- `Launcher.ps1`
+- `README.md`
+- `clean_generation_log.md`
 
-## Runtime behaviour
+## Functional changes
 
-- Ha a syntax validator tényleges `.ps1` / `.psm1` fájlt talál hibásnak: bootstrap stop.
-- Ha a syntax validator saját belső hibát jelez (`InternalError=true`): bootstrap warning, majd folytatás.
-- A warning részletei ide kerülnek:
+### SystemEvidenceCollector
 
-```text
-logs\syntax-validator-internal-warning-YYYYMMDD-HHMMSS.json
-```
+- Version bumped to `1.2.7`.
+- Native PowerShell arrays are used instead of generic .NET list objects in the critical collection path.
+- `Get-RebootPendingSnapshot`, `Get-DriverSnapshot`, `Collect-Events`, `Copy-IfExists`, and package manifest generation were hardened.
+- A top-level collector body catch path creates `collector-errors.json` and `ai_summary.json` instead of allowing the GUI call to fail unhandled.
+- `TargetKB` is propagated into the system evidence package path and README context.
 
-## Execution order
+### GUI detail text
 
-1. `install_and_run.bat`
-2. `diagnostics/Initialize-DiagEnvironment.ps1`
-3. `validators/Validate-Manifests.ps1`
-4. `validators/Validate-UiResources.ps1`
-5. `validators/Validate-PowerShellSyntax.ps1`
-6. `Launcher.ps1`
-7. GUI vagy CLI collector modulok
+- Manifest `Ui.Summary` and `Ui.RecommendedAction` fields were expanded into detailed, scroll-friendly explanation blocks.
+- These texts explain what each module checks, when to run it, and how to interpret next steps.
+
+### Launcher
+
+- `TargetKB` is now passed to `SystemEvidenceCollector` during diagnostics and actual collection.
+
+## Expected runtime behavior
+
+If registry, driver or event collection fails, the package should continue and mark the result as `Partial` instead of failing the whole operation. The main evidence package should still contain:
+
+- `AI_README.md`
+- `ai_summary.json`
+- `collector-progress.jsonl`
+- `errors/collector-errors.json`
 
 ## Validation
 
-- JSON manifest files: syntax checked.
-- UI resource JSON: syntax checked.
-- ZIP package integrity: checked.
-- Patch ZIP integrity: checked.
-- Windows runtime test: not executed in generation environment.
+- JSON manifests: generated and parsed successfully in build environment.
+- ZIP packaging: generated successfully in build environment.
+- PowerShell runtime validation: not executable in this Linux container; client-side PowerShell 7.6.2 validation is required.
 
-## Known limitation
+## Run order
 
-A `ScriptBlock.Create()` környezeti vagy PowerShell-verzióspecifikus belső hibája továbbra is előfordulhat. A v1.2.6 ezt már nem blokkoló hibaként kezeli, hanem elkülönített warningként naplózza.
-
-## SHA256
-
-Generated after packaging; see final assistant response.
-
-## diagnostics_starter_pack
-
-A build tartalmazza a Windows 11 PowerShell környezetellenőrző és önvalidáló sablont:
-
-```text
-diagnostics\Initialize-DiagEnvironment.ps1
-```
-
+1. Apply patch over the repository root.
+2. Run `./diagnostics/Initialize-DiagEnvironment.ps1`.
+3. Run `./install_and_run.bat` or `./tools/Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573`.
+4. Inspect `logs/evidence_packages/<package>/collector-progress.jsonl` and `errors/collector-errors.json`.
