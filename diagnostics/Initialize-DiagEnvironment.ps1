@@ -1,6 +1,10 @@
 <#
 .SYNOPSIS
   Környezeti diagnosztika és opcionális javítás Windows 11 / PowerShell 7.x futtatáshoz.
+.DESCRIPTION
+  v1.2.3: a validátorok JSON kimenetét stream-összemosás nélkül értékeli ki.
+  A PowerShell szintaxisvalidátor hibája így nem keveredik a JSON kimenetbe, és
+  az Argument types do not match jellegű validátorhibák pontosabb üzenettel jelennek meg.
 #>
 [CmdletBinding()]
 param(
@@ -12,7 +16,7 @@ $ErrorActionPreference = 'Stop'
 
 $RootPath = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $logDir = Join-Path $RootPath 'logs'
-if (-not (Test-Path $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
+if (-not (Test-Path -LiteralPath $logDir)) { New-Item -Path $logDir -ItemType Directory -Force | Out-Null }
 $logFile = Join-Path $logDir ('environment-{0}.log' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 
 function Write-EnvLog {
@@ -25,6 +29,48 @@ function Test-IsAdmin {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
     $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
+}
+
+function Invoke-JsonValidatorScript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter()][hashtable]$Arguments = @{}
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        throw "$Name nem található: $Path"
+    }
+
+    Write-EnvLog "$Name futtatása."
+
+    try {
+        $output = & $Path @Arguments
+        $succeeded = $?
+    }
+    catch {
+        throw "$Name futási hiba: $($_.Exception.Message)"
+    }
+
+    $text = ($output | Out-String).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($text)) {
+        $text | Tee-Object -FilePath $logFile -Append
+    }
+
+    if (-not $succeeded) {
+        throw "$Name sikertelenül futott."
+    }
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        throw "$Name nem adott JSON kimenetet."
+    }
+
+    try {
+        return ($text | ConvertFrom-Json -ErrorAction Stop)
+    }
+    catch {
+        throw "$Name kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)"
+    }
 }
 
 Write-EnvLog "RootPath: $RootPath"
@@ -42,54 +88,31 @@ try {
     throw
 }
 
-Write-EnvLog 'Manifest validátor futtatása.'
-$validator = Join-Path $RootPath 'validators\Validate-Manifests.ps1'
+$manifestSummary = Invoke-JsonValidatorScript `
+    -Name 'Manifest validátor' `
+    -Path (Join-Path $RootPath 'validators\Validate-Manifests.ps1') `
+    -Arguments @{ RootPath = $RootPath }
 
-# PowerShell script hívás után a $LASTEXITCODE nem megbízható ellenőrzési pont,
-# mert csak natív folyamatok vagy explicit exit kulcsszó állítja be biztosan.
-# Set-StrictMode -Version Latest mellett egy még nem létező $LASTEXITCODE olvasása
-# termináló hibát okozhat, ezért a validátor JSON kimenetét értékeljük ki.
-$validationOutput = @(& $validator -RootPath $RootPath 2>&1)
-$validationSucceeded = $?
-$validationOutput | Tee-Object -FilePath $logFile -Append
-
-if (-not $validationSucceeded) {
-    throw 'Manifest validátor futási hiba.'
+if ([int]$manifestSummary.Failed -gt 0) {
+    throw "Manifest validációs hiba. Hibás manifestek száma: $($manifestSummary.Failed)"
 }
 
-try {
-    $validationSummary = ($validationOutput | Out-String | ConvertFrom-Json -ErrorAction Stop)
-}
-catch {
-    throw "Manifest validátor kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)"
-}
+$uiSummary = Invoke-JsonValidatorScript `
+    -Name 'UI resource validátor' `
+    -Path (Join-Path $RootPath 'validators\Validate-UiResources.ps1') `
+    -Arguments @{ RootPath = $RootPath; Culture = 'hu-HU' }
 
-if ([int]$validationSummary.Failed -gt 0) {
-    throw "Manifest validációs hiba. Hibás manifestek száma: $($validationSummary.Failed)"
+if (-not [bool]$uiSummary.Valid) {
+    throw "UI resource validációs hiba. Hibák száma: $($uiSummary.ErrorCount)"
 }
 
+$syntaxSummary = Invoke-JsonValidatorScript `
+    -Name 'PowerShell szintaxisvalidátor' `
+    -Path (Join-Path $RootPath 'validators\Validate-PowerShellSyntax.ps1') `
+    -Arguments @{ RootPath = $RootPath }
 
-Write-EnvLog 'UI resource validátor futtatása.'
-$uiValidator = Join-Path $RootPath 'validators\Validate-UiResources.ps1'
-$uiValidationOutput = @(& $uiValidator -RootPath $RootPath -Culture 'hu-HU' 2>&1)
-$uiValidationSucceeded = $?
-$uiValidationOutput | Tee-Object -FilePath $logFile -Append
-if (-not $uiValidationSucceeded) { throw 'UI resource validátor futási hiba.' }
-try { $uiValidationSummary = ($uiValidationOutput | Out-String | ConvertFrom-Json -ErrorAction Stop) }
-catch { throw "UI resource validátor kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)" }
-if (-not [bool]$uiValidationSummary.Valid) { throw "UI resource validációs hiba. Hibák száma: $($uiValidationSummary.ErrorCount)" }
-
-
-Write-EnvLog 'PowerShell szintaxisvalidátor futtatása.'
-$syntaxValidator = Join-Path $RootPath 'validators\Validate-PowerShellSyntax.ps1'
-$syntaxValidationOutput = @(& $syntaxValidator -RootPath $RootPath 2>&1)
-$syntaxValidationSucceeded = $?
-$syntaxValidationOutput | Tee-Object -FilePath $logFile -Append
-if (-not $syntaxValidationSucceeded) { throw 'PowerShell szintaxisvalidátor futási hiba.' }
-try { $syntaxValidationSummary = ($syntaxValidationOutput | Out-String | ConvertFrom-Json -ErrorAction Stop) }
-catch { throw "PowerShell szintaxisvalidátor kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)" }
-if (-not [bool]$syntaxValidationSummary.Valid) {
-    throw "PowerShell szintaxisvalidációs hiba. Hibás fájlok száma: $($syntaxValidationSummary.Failed)"
+if (-not [bool]$syntaxSummary.Valid) {
+    throw "PowerShell szintaxisvalidációs hiba. Hibás fájlok száma: $($syntaxSummary.Failed)"
 }
 
 if ($InstallPSWindowsUpdate) {

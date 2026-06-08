@@ -1,55 +1,74 @@
-# CLEAN Generation Log / Changelog
+# CLEAN Generation Log / Changelog — DiagFramework v1.2.3 Validator Invocation Hotfix
 
 ## Build metadata
 
-- Project: DiagFramework Windows Update Repair MVP
-- Version: v1.2.2-system-evidence-syntax-hotfix
-- Generated at: 2026-06-08T08:47:30+00:00
-- Generator purpose: Hotfix for SystemEvidenceCollector PowerShell parser error and pre-run syntax validation.
+- Timestamp: `2026-06-08T08:55:37.932242+00:00`
+- Project: `DiagFramework Windows Update Repair / System Evidence Collector`
+- Version: `1.2.3`
+- Build type: `Hotfix`
+- Scope: PowerShell syntax validator and environment bootstrap
 
-## Change summary
+## Purpose
 
-### Fixed
+Javítás az alábbi futási hibára:
 
-- Fixed `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1` parser error in `Convert-EventRecordFlat`.
-- Removed direct `try { } catch { }` statements from `[PSCustomObject]@{ ... }` property values.
-- Event record fields are now read into local variables before object creation.
+```text
+Validate-PowerShellSyntax.ps1: ... Initialize-DiagEnvironment.ps1:85
+Argument types do not match
+```
 
-### Added
+A hiba oka az volt, hogy a PowerShell parser-validátor `Parser.ParseFile()` hívása nem elég szigorúan tipizált `[ref]` változókkal dolgozott, miközben a bootstrap script a validátor stdout/error streamjeit egy tömbbe keverte. PowerShell 7.x alatt ez félrevezető validátorhibát eredményezhetett.
 
-- Added `validators/Validate-PowerShellSyntax.ps1`.
-- Added automatic syntax validation call to `diagnostics/Initialize-DiagEnvironment.ps1`.
+## Changed files
 
-### Updated
-
-- Updated `modules/SystemEvidenceCollector/manifest.json` to version `1.2.2`.
-- Updated README with the v1.2.2 hotfix notes.
-
-## Modified files
-
-- `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
-- `modules/SystemEvidenceCollector/manifest.json`
-- `diagnostics/Initialize-DiagEnvironment.ps1`
 - `validators/Validate-PowerShellSyntax.ps1`
+  - explicit `Token[]` és `ParseError[]` referencia-változók;
+  - lapos, AI-barát JSON kimenet;
+  - `SchemaVersion` mező;
+  - `logs` könyvtár kizárása továbbra is megmaradt.
+- `diagnostics/Initialize-DiagEnvironment.ps1`
+  - új `Invoke-JsonValidatorScript` helper;
+  - validátorok JSON-kimenetének stream-összemosás nélküli feldolgozása;
+  - pontosabb hibaüzenetek.
 - `README.md`
+  - v1.2.3 hotfix leírás és kézi validálási parancsok.
 - `clean_generation_log.md`
+  - Markdown changelog/build log, timestampelt CLEAN generálási dokumentáció.
 
-## Runtime order
+## Execution order
 
-1. `install_and_run.bat`
-2. `diagnostics/Initialize-DiagEnvironment.ps1`
-3. `validators/Validate-Manifests.ps1`
-4. `validators/Validate-UiResources.ps1`
-5. `validators/Validate-PowerShellSyntax.ps1`
-6. `Launcher.ps1`
-7. GUI action: `SystemEvidenceCollector` / `Collect-SystemEvidence.ps1`
+1. `diagnostics/Initialize-DiagEnvironment.ps1`
+2. `validators/Validate-Manifests.ps1`
+3. `validators/Validate-UiResources.ps1`
+4. `validators/Validate-PowerShellSyntax.ps1`
+5. `Launcher.ps1` vagy célzott CLI tool
+6. `tools/Collect-SystemEvidence.ps1`
 
-## Validation notes
+## Validation performed in generation environment
 
-- JSON files were parsed successfully during package generation.
-- ZIP integrity was checked after package creation.
-- PowerShell runtime parser validation cannot be executed inside this Linux container because `pwsh` is not available here; the included validator runs on the target Windows/PowerShell 7 environment before the GUI starts.
+- ZIP file creation completed.
+- ZIP integrity checked with Python `zipfile.testzip()`.
+- JSON files parsed with Python `json` module.
+- PowerShell runtime parser validation could not be executed in this Linux container because `pwsh` is unavailable here.
 
 ## Known limitations
 
-- Some Windows Event Logs or vendor diagnostic paths may be inaccessible depending on permissions or installed hardware/vendor tooling. These cases are expected to be recorded in `errors/collector-errors.json`, not treated as fatal collector failures.
+- A tényleges PowerShell parser-validálást Windows 11 + PowerShell 7.x környezetben kell futtatni.
+- A `Get-WinEvent`, vendor logok, WER és védett rendszerkönyvtárak olvasása admin jogosultságot igényelhet.
+
+## Developer changelog
+
+- `v1.2.3`: Validator invocation and parser reference typing hotfix.
+- `v1.2.2`: SystemEvidenceCollector syntax hotfix.
+- `v1.2.1`: SystemEvidence partial-package and AI_README hotfix.
+- `v1.2.0`: Structured AI UI, manifest-driven summaries and system evidence collector.
+
+## diagnostics_starter_pack
+
+A csomag tartalmazza a Windows 11 PowerShell környezetellenőrző diagnosztikai sablont:
+
+```text
+diagnostics/Initialize-DiagEnvironment.ps1
+```
+
+A diagnosztika minden projektindítás előtt ellenőrzi a futtatási környezetet, a manifesteket, az UI resource fájlokat és a PowerShell szintaxist.

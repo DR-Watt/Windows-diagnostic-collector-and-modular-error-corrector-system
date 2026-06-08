@@ -227,3 +227,30 @@ validators\Validate-PowerShellSyntax.ps1
 ```
 
 A környezeti diagnosztika most már indításkor lefuttatja a PowerShell parser-alapú szintaxisellenőrzést a `.ps1` és `.psm1` fájlokon, így hasonló parse-hiba nem csak a GUI-gomb megnyomásakor derül ki.
+
+## v1.2.3 Validator Invocation Hotfix
+
+Ez a hotfix a környezeti diagnosztika PowerShell szintaxisvalidátorának indítását és a validator saját parser-hívását javítja.
+
+### Javított hiba
+
+Korábbi hiba:
+
+```text
+Validate-PowerShellSyntax.ps1: ... Initialize-DiagEnvironment.ps1:85
+Argument types do not match
+```
+
+A javítás két részből áll:
+
+1. `Validate-PowerShellSyntax.ps1`: explicit `[System.Management.Automation.Language.Token[]]` és `[System.Management.Automation.Language.ParseError[]]` referencia-változókat használ a `Parser.ParseFile()` híváshoz.
+2. `Initialize-DiagEnvironment.ps1`: a validátorokat külön JSON-kimenetként kezeli, nem keveri össze a JSON-t a PowerShell error streammel.
+
+### Kézi validálás
+
+```powershell
+Set-Location C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
+.\validators\Validate-PowerShellSyntax.ps1 -RootPath .
+.\diagnostics\Initialize-DiagEnvironment.ps1
+```
+
