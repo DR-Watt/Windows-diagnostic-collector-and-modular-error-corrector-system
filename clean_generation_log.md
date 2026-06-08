@@ -1,78 +1,75 @@
-# CLEAN Generation Log — DiagFramework v1.2.5 Syntax Validator Safe Mode Hotfix
+# CLEAN Generation Log / Changelog — DiagFramework v1.2.6 Syntax Validator Non-Blocking Hotfix
 
 ## Build metadata
 
-- **Generated at:** 2026-06-08T11:15:00+02:00
-- **Project:** Windows diagnostic collector and modular error corrector system
-- **Version:** v1.2.5
-- **Build name:** `syntax_validator_safe_mode_hotfix`
-- **Purpose:** Fix bootstrap failure in `Validate-PowerShellSyntax.ps1` caused by PowerShell parser `[ref]` out-parameter binding errors (`Argument types do not match`) under PowerShell 7.6.2.
+- Project: `Windows-diagnostic-collector-and-modular-error-corrector-system`
+- Build version: `v1.2.6`
+- Build name: `syntax_validator_nonblocking`
+- Generated at: `2026-06-08T11:18:00+02:00`
+- Target platform: Windows 11, PowerShell 7.x
+- Package type: CLEAN hotfix build
 
-## Problem summary
+## Purpose
 
-The v1.2.4 environment bootstrap reached the PowerShell syntax validation phase and then failed with:
+A v1.2.5 buildben a PowerShell szintaxisvalidátor már JSON választ adott, de a kliensgépen továbbra is `ValidatorInternalError: Argument types do not match` belső hibát jelzett. Emiatt a bootstrap blokkolta a GUI indítását, noha ez nem bizonyított tényleges forráskód-szintaktikai hiba volt.
+
+A v1.2.6 célja:
+
+1. a `Validate-PowerShellSyntax.ps1` további egyszerűsítése,
+2. a validátor belső hibájának elkülönítése a tényleges fájlszintű szintaktikai hibától,
+3. a bootstrap folytatása warning mellett, ha csak a validátor saját belső hibája jelentkezik,
+4. a részletek AI-barát JSON fájlba mentése.
+
+## Modified files
+
+| File | Change |
+|---|---|
+| `validators/Validate-PowerShellSyntax.ps1` | v1.2.6 Safe/Non-blocking compatible validator. Nincs `Parser.ParseFile`, nincs generic list, nincs `Set-StrictMode`, egyszerűbb `ScriptBlock.Create` alapú parse. |
+| `diagnostics/Initialize-DiagEnvironment.ps1` | A syntax validator `InternalError=true` eredménye warningként kezelődik. Tényleges fájlszintű syntax error továbbra is blokkol. |
+| `README.md` | v1.2.6 hotfix leírás hozzáadva. |
+| `clean_generation_log.md` | Markdown changelog/build log frissítve. |
+
+## Runtime behaviour
+
+- Ha a syntax validator tényleges `.ps1` / `.psm1` fájlt talál hibásnak: bootstrap stop.
+- Ha a syntax validator saját belső hibát jelez (`InternalError=true`): bootstrap warning, majd folytatás.
+- A warning részletei ide kerülnek:
 
 ```text
-PowerShell szintaxisvalidátor futási hiba: Argument types do not match
+logs\syntax-validator-internal-warning-YYYYMMDD-HHMMSS.json
 ```
 
-The failure came from the syntax validator itself, not from the actual target PowerShell files. The previous validator used `System.Management.Automation.Language.Parser.ParseFile()` with `[ref]` out-parameters. In the affected runtime, this method invocation failed before a structured JSON validation report could be returned.
+## Execution order
 
-## Change summary
+1. `install_and_run.bat`
+2. `diagnostics/Initialize-DiagEnvironment.ps1`
+3. `validators/Validate-Manifests.ps1`
+4. `validators/Validate-UiResources.ps1`
+5. `validators/Validate-PowerShellSyntax.ps1`
+6. `Launcher.ps1`
+7. GUI vagy CLI collector modulok
 
-### Modified files
+## Validation
 
-| Path | Change |
-|---|---|
-| `validators/Validate-PowerShellSyntax.ps1` | Replaced `Parser.ParseFile()` / `[ref]` out-parameter validation with `ScriptBlock.Create()` safe-mode parsing. |
-| `README.md` | Updated v1.2.5 notes and patch instructions. |
-| `clean_generation_log.md` | This Markdown build/changelog log. |
+- JSON manifest files: syntax checked.
+- UI resource JSON: syntax checked.
+- ZIP package integrity: checked.
+- Patch ZIP integrity: checked.
+- Windows runtime test: not executed in generation environment.
 
-### Deleted files
+## Known limitation
 
-None.
+A `ScriptBlock.Create()` környezeti vagy PowerShell-verzióspecifikus belső hibája továbbra is előfordulhat. A v1.2.6 ezt már nem blokkoló hibaként kezeli, hanem elkülönített warningként naplózza.
 
-## Technical notes
+## SHA256
 
-- `ScriptBlock.Create()` parses the PowerShell source into a script block but does not execute it.
-- The validator now catches parse errors and returns them as JSON.
-- The validator has a final catch block that also converts internal validator errors into JSON.
-- This prevents `Initialize-DiagEnvironment.ps1` from receiving a raw runtime exception during bootstrap.
+Generated after packaging; see final assistant response.
 
-## Runtime validation sequence
+## diagnostics_starter_pack
 
-Recommended order after applying the patch:
+A build tartalmazza a Windows 11 PowerShell környezetellenőrző és önvalidáló sablont:
 
-```powershell
-Set-Location C:\git_wdcmac\Windows-diagnostic-collector-and-modular-error-corrector-system
-.\diagnostics\Initialize-DiagEnvironment.ps1
-.\tools\Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573
+```text
+diagnostics\Initialize-DiagEnvironment.ps1
 ```
-
-## Validation results during generation
-
-- JSON files: checked syntactically where applicable.
-- ZIP creation: completed.
-- Patch ZIP creation: completed.
-- Windows runtime test: not executed in the generation environment.
-
-## Known limitations
-
-- `ScriptBlock.Create()` provides fewer structured parse details than the AST parser API, but it is safer for bootstrap validation.
-- The validator still does not execute scripts; it only checks parseability.
-- Full PowerShell 7.6.2 runtime validation must be performed on the target Windows machine.
-
-## Changelog
-
-### v1.2.5
-
-- Replaced fragile parser-ref syntax validation with safe-mode ScriptBlock parsing.
-- Added final JSON fallback for validator-internal exceptions.
-- Preserved the same JSON schema expected by `Initialize-DiagEnvironment.ps1`:
-  - `SchemaVersion`
-  - `RootPath`
-  - `Checked`
-  - `Failed`
-  - `Valid`
-  - `Results`
 

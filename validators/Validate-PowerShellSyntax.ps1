@@ -2,32 +2,32 @@
 .SYNOPSIS
   DiagFramework PowerShell szintaxisvalidátor.
 .DESCRIPTION
-  v1.2.5 Safe Mode: a korábbi Parser.ParseFile / [ref] out-paraméteres validálást
-  kiváltja egy ScriptBlock.Create alapú, nem végrehajtó parser-próbával.
+  v1.2.6 Safe/Non-blocking compatible validator.
 
-  Indok: több PowerShell 7.x környezetben a System.Management.Automation.Language.Parser
-  statikus metódusainak [ref] out-paraméter kötése "Argument types do not match" hibával
-  megszakíthatja magát a validátort. Ez bootstrap validátornál elfogadhatatlan.
+  Cél:
+  - .ps1 és .psm1 fájlok szintaktikai ellenőrzése végrehajtás nélkül.
+  - A validátor saját hibája ne állítsa meg a teljes bootstrap folyamatot.
+  - Tényleges fájlszintű szintaktikai hiba strukturált JSON-ként jelenjen meg.
 
-  A ScriptBlock.Create csak parse-olja a forráskódot, nem hajtja végre. Ha a fájl szintaktikailag
-  hibás, kivételt dob, amelyet a validátor strukturált JSON eredménnyé alakít.
+  Megjegyzés:
+  A korábbi Parser.ParseFile / [ref] out-paraméteres megoldást eltávolítottuk, mert
+  bizonyos PowerShell 7.x környezetekben "Argument types do not match" hibát okozott.
+  A ScriptBlock.Create csak parse-olja a forrást, nem futtatja.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$RootPath
 )
 
-Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function New-SyntaxErrorRecord {
-    [CmdletBinding()]
+function New-DfSyntaxErrorRecord {
     param(
-        [Parameter(Mandatory)][string]$Message,
-        [string]$ErrorId = 'PowerShellSyntaxError',
-        [object]$StartLineNumber = $null,
-        [object]$StartColumnNumber = $null,
-        [string]$Text = $null
+        [string]$Message,
+        [string]$ErrorId,
+        $StartLineNumber,
+        $StartColumnNumber,
+        [string]$Text
     )
 
     [PSCustomObject]@{
@@ -35,142 +35,147 @@ function New-SyntaxErrorRecord {
         ErrorId           = [string]$ErrorId
         StartLineNumber   = $StartLineNumber
         StartColumnNumber = $StartColumnNumber
-        Text              = $Text
+        Text              = [string]$Text
     }
 }
 
-function Convert-ExceptionToSyntaxErrors {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][System.Management.Automation.ErrorRecord]$ErrorRecord)
+function Convert-DfExceptionToErrors {
+    param($CaughtError)
 
-    $items = New-Object System.Collections.Generic.List[object]
-    $exception = $ErrorRecord.Exception
+    $out = @()
+    $message = $null
+    $errorId = $null
 
-    # ParseException esetén gyakran elérhető több részletes ParserError.
+    try { $message = [string]$CaughtError.Exception.Message } catch { $message = 'Ismeretlen PowerShell parse hiba.' }
+    try { $errorId = [string]$CaughtError.FullyQualifiedErrorId } catch { $errorId = 'PowerShellSyntaxError' }
+
+    # ParseException esetén megpróbáljuk kinyerni a részletes parser hibákat.
+    # Minden mezőolvasás védett, mert bootstrap validátornál nem megengedett a másodlagos hiba.
     try {
-        if ($exception -is [System.Management.Automation.ParseException] -and $exception.Errors) {
-            foreach ($parseError in @($exception.Errors)) {
+        $exception = $CaughtError.Exception
+        $parserErrors = $null
+        try { $parserErrors = $exception.Errors } catch { $parserErrors = $null }
+
+        if ($null -ne $parserErrors) {
+            foreach ($parseError in @($parserErrors)) {
                 $line = $null
                 $column = $null
                 $text = $null
-                try { $line = [int]$parseError.Extent.StartLineNumber } catch { $line = $null }
-                try { $column = [int]$parseError.Extent.StartColumnNumber } catch { $column = $null }
+                $peMessage = $message
+                $peErrorId = $errorId
+
+                try { $peMessage = [string]$parseError.Message } catch { }
+                try { $peErrorId = [string]$parseError.ErrorId } catch { }
+                try { $line = $parseError.Extent.StartLineNumber } catch { $line = $null }
+                try { $column = $parseError.Extent.StartColumnNumber } catch { $column = $null }
                 try { $text = [string]$parseError.Extent.Text } catch { $text = $null }
 
-                $items.Add((New-SyntaxErrorRecord `
-                    -Message ([string]$parseError.Message) `
-                    -ErrorId ([string]$parseError.ErrorId) `
-                    -StartLineNumber $line `
-                    -StartColumnNumber $column `
-                    -Text $text)) | Out-Null
+                $out += New-DfSyntaxErrorRecord -Message $peMessage -ErrorId $peErrorId -StartLineNumber $line -StartColumnNumber $column -Text $text
             }
         }
     }
     catch {
-        # Szándékosan üres: a validátor soha ne omoljon össze hibaobjektum-feldolgozás közben.
+        # Nincs teendő: fallback üzenetet adunk lentebb.
     }
 
-    if ($items.Count -eq 0) {
-        $items.Add((New-SyntaxErrorRecord `
-            -Message ([string]$exception.Message) `
-            -ErrorId ([string]$ErrorRecord.FullyQualifiedErrorId) `
-            -StartLineNumber $null `
-            -StartColumnNumber $null `
-            -Text $null)) | Out-Null
+    if (@($out).Count -eq 0) {
+        $out += New-DfSyntaxErrorRecord -Message $message -ErrorId $errorId -StartLineNumber $null -StartColumnNumber $null -Text $null
     }
 
-    return @($items)
+    return @($out)
 }
 
-function Test-OnePowerShellFileSyntax {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Path)
+function Test-DfPowerShellFileSyntax {
+    param([string]$Path)
 
     try {
-        $content = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop
+        $content = [System.IO.File]::ReadAllText([string]$Path, [System.Text.Encoding]::UTF8)
     }
     catch {
         return [PSCustomObject]@{
-            Path       = $Path
+            Path       = [string]$Path
             Valid      = $false
             ErrorCount = 1
             Errors     = @(
-                New-SyntaxErrorRecord `
-                    -Message ("Fájlolvasási hiba: {0}" -f $_.Exception.Message) `
-                    -ErrorId 'FileReadFailed'
+                New-DfSyntaxErrorRecord -Message ("Fájlolvasási hiba: {0}" -f $_.Exception.Message) -ErrorId 'FileReadFailed' -StartLineNumber $null -StartColumnNumber $null -Text $null
             )
         }
     }
 
     try {
-        # Csak szintaktikai elemzés történik. A ScriptBlock nem kerül végrehajtásra.
-        $null = [scriptblock]::Create($content)
-
+        # Csak szintaktikai elemzés: a ScriptBlock nem kerül végrehajtásra.
+        [void][scriptblock]::Create([string]$content)
         return [PSCustomObject]@{
-            Path       = $Path
+            Path       = [string]$Path
             Valid      = $true
             ErrorCount = 0
             Errors     = @()
         }
     }
     catch {
-        $errors = @(Convert-ExceptionToSyntaxErrors -ErrorRecord $_)
+        $errs = @(Convert-DfExceptionToErrors -CaughtError $_)
         return [PSCustomObject]@{
-            Path       = $Path
+            Path       = [string]$Path
             Valid      = $false
-            ErrorCount = $errors.Count
-            Errors     = @($errors)
+            ErrorCount = @($errs).Count
+            Errors     = @($errs)
         }
     }
 }
 
+$results = @()
+$checked = 0
 try {
     if (-not (Test-Path -LiteralPath $RootPath)) {
         throw "A megadott RootPath nem található: $RootPath"
     }
 
-    $results = New-Object System.Collections.Generic.List[object]
-    $files = Get-ChildItem -LiteralPath $RootPath -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object {
-            ($_.Extension -in @('.ps1', '.psm1')) -and
-            ($_.FullName -notmatch '\\logs\\|/logs/')
-        } |
-        Sort-Object FullName
-
-    foreach ($file in $files) {
-        $results.Add((Test-OnePowerShellFileSyntax -Path $file.FullName)) | Out-Null
+    $allFiles = @(Get-ChildItem -LiteralPath $RootPath -Recurse -File -ErrorAction SilentlyContinue)
+    $psFiles = @()
+    foreach ($item in $allFiles) {
+        $fullName = [string]$item.FullName
+        $extension = [string]$item.Extension
+        if (($extension -eq '.ps1' -or $extension -eq '.psm1') -and ($fullName -notmatch '\\logs\\|/logs/')) {
+            $psFiles += $item
+        }
     }
 
-    $failed = @($results | Where-Object { -not $_.Valid })
+    $psFiles = @($psFiles | Sort-Object FullName)
+    foreach ($file in $psFiles) {
+        $checked++
+        $results += Test-DfPowerShellFileSyntax -Path ([string]$file.FullName)
+    }
+
+    $failed = @($results | Where-Object { -not [bool]$_.Valid })
     [PSCustomObject]@{
         SchemaVersion = 'diagframework.validator.powershellsyntax.v1'
-        ValidatorMode = 'ScriptBlockCreateSafeMode'
-        RootPath      = $RootPath
-        Checked       = @($results).Count
-        Failed        = @($failed).Count
+        ValidatorMode = 'ScriptBlockCreateSafeMode-v1.2.6'
+        RootPath      = [string]$RootPath
+        Checked       = [int]$checked
+        Failed        = [int]@($failed).Count
         Valid         = (@($failed).Count -eq 0)
+        InternalError = $false
         Results       = @($results)
     } | ConvertTo-Json -Depth 18
 }
 catch {
-    # Végső védőháló: a validátor saját hibáját is JSON-ként adja vissza,
-    # hogy az Initialize-DiagEnvironment ne nyers PowerShell kivételként omoljon össze.
+    # A validátor saját hibája nem fájlszintű PowerShell szintaktikai hiba.
+    # Strukturáltan visszaadjuk, hogy a bootstrap eldönthesse: warningként folytatható-e.
     [PSCustomObject]@{
         SchemaVersion = 'diagframework.validator.powershellsyntax.v1'
-        ValidatorMode = 'ScriptBlockCreateSafeMode'
-        RootPath      = $RootPath
-        Checked       = 0
+        ValidatorMode = 'ScriptBlockCreateSafeMode-v1.2.6'
+        RootPath      = [string]$RootPath
+        Checked       = [int]$checked
         Failed        = 1
         Valid         = $false
+        InternalError = $true
         Results       = @(
             [PSCustomObject]@{
                 Path       = $null
                 Valid      = $false
                 ErrorCount = 1
                 Errors     = @(
-                    New-SyntaxErrorRecord `
-                        -Message ("ValidatorInternalError: {0}" -f $_.Exception.Message) `
-                        -ErrorId 'ValidatorInternalError'
+                    New-DfSyntaxErrorRecord -Message ("ValidatorInternalError: {0}" -f $_.Exception.Message) -ErrorId 'ValidatorInternalError' -StartLineNumber $null -StartColumnNumber $null -Text $null
                 )
             }
         )

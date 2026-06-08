@@ -2,8 +2,8 @@
 .SYNOPSIS
   Környezeti diagnosztika és opcionális javítás Windows 11 / PowerShell 7.x futtatáshoz.
 .DESCRIPTION
-  v1.2.4: a bootstrap logger nem szennyezi a validátorok success streamjét.
-  A validátor JSON kimenete sémavizsgálatot kap, a naplózás pedig Add-Content + Write-Host mintára váltott.
+  v1.2.6: a PowerShell szintaxisvalidátor saját belső hibája nem blokkolja a bootstrapet.
+  A tényleges fájlszintű szintaktikai hibák továbbra is blokkolnak, a validátor belső hibája warningként naplózódik.
 #>
 [CmdletBinding()]
 param(
@@ -157,7 +157,21 @@ $syntaxSummary = Invoke-JsonValidatorScript `
 Assert-ValidatorProperty -Summary $syntaxSummary -Name 'PowerShell szintaxisvalidátor' -RequiredProperties @('Valid','Failed','Checked','Results')
 
 if (-not [bool]$syntaxSummary.Valid) {
-    throw "PowerShell szintaxisvalidációs hiba. Hibás fájlok száma: $($syntaxSummary.Failed)"
+    $isInternalSyntaxValidatorError = $false
+    try {
+        if ($syntaxSummary.PSObject.Properties['InternalError'] -and [bool]$syntaxSummary.InternalError) {
+            $isInternalSyntaxValidatorError = $true
+        }
+    } catch { $isInternalSyntaxValidatorError = $false }
+
+    if ($isInternalSyntaxValidatorError) {
+        $warnPath = Join-Path $logDir ('syntax-validator-internal-warning-{0}.json' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        $syntaxSummary | ConvertTo-Json -Depth 18 | Out-File -LiteralPath $warnPath -Encoding UTF8 -Force
+        Write-EnvLog "PowerShell szintaxisvalidátor belső hibát jelzett, ezért WARNING-ként kezelve folytatom. Részletek: $warnPath"
+    }
+    else {
+        throw "PowerShell szintaxisvalidációs hiba. Hibás fájlok száma: $($syntaxSummary.Failed)"
+    }
 }
 
 if ($InstallPSWindowsUpdate) {

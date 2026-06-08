@@ -64,3 +64,13 @@ logs\AI_README.md
 logs\evidence_packages\AI_README.md
 logs\ai_packages\AI_README.md
 ```
+
+## v1.2.6 hotfix – PowerShell syntax validator non-blocking bootstrap
+
+A v1.2.6 javítás célja, hogy a PowerShell szintaxisvalidátor saját belső hibája ne blokkolja a teljes programindítást. A tényleges fájlszintű PowerShell szintaktikai hibák továbbra is blokkoló hibák. Ha viszont maga a validátor fut bele környezeti vagy típuskötési hibába, a rendszer `WARNING` státusszal folytatja, és a részleteket a `logs\syntax-validator-internal-warning-*.json` fájlba írja.
+
+Érintett fájlok:
+
+- `validators\Validate-PowerShellSyntax.ps1`
+- `diagnostics\Initialize-DiagEnvironment.ps1`
+
