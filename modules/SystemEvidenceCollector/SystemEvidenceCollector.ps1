@@ -5,8 +5,8 @@
 .DESCRIPTION
   Nem javít rendszert. Strukturált, AI által elemezhető ZIP csomagot készít
   boot, setup, driver, update, crash és ismert gyártói diagnosztikai nyomokból.
-  v1.2.1: lépésenként hibaszigetelt gyűjtés, gyökérszintű AI_README fájlok,
-  részleges csomagkészítés hiba esetén is.
+  v1.2.2: PowerShell parser-hiba javítás a Convert-EventRecordFlat függvényben,
+  valamint előindítási PowerShell szintaxisvalidátor.
 #>
 [CmdletBinding()]
 param(
@@ -22,7 +22,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ModuleId = 'SystemEvidenceCollector'
-$ModuleVersion = '1.2.1'
+$ModuleVersion = '1.2.2'
 
 function Get-Metadata {
     [PSCustomObject]@{
@@ -270,20 +270,51 @@ A csomag gépnevet, felhasználónevet, eszköz- és driveradatokat, valamint ú
 
 function Convert-EventRecordFlat {
     param([Parameter(Mandatory)]$Event)
+
+    # PowerShell hashtable literals cannot safely use a raw try/catch statement as a value
+    # expression in all parser contexts. Keep all guarded reads outside the PSCustomObject
+    # literal so the module can be parsed before any event data is collected.
+    $timeCreated = $null
+    $providerName = $null
+    $logName = $null
+    $eventId = $null
+    $levelDisplayName = $null
+    $machineName = $null
+    $recordId = $null
+    $taskDisplayName = $null
+    $opcodeDisplayName = $null
     $keywords = @()
+    $message = '<MessageUnavailable>'
+
+    try {
+        if ($null -ne $Event.TimeCreated) {
+            $timeCreated = ([datetime]$Event.TimeCreated).ToString('o')
+        }
+    } catch { $timeCreated = $null }
+
+    try { $providerName = ConvertTo-SafeString -Value $Event.ProviderName } catch { $providerName = $null }
+    try { $logName = ConvertTo-SafeString -Value $Event.LogName } catch { $logName = $null }
+    try { if ($null -ne $Event.Id) { $eventId = [int]$Event.Id } } catch { $eventId = $null }
+    try { $levelDisplayName = ConvertTo-SafeString -Value $Event.LevelDisplayName } catch { $levelDisplayName = $null }
+    try { $machineName = ConvertTo-SafeString -Value $Event.MachineName } catch { $machineName = $null }
+    try { if ($null -ne $Event.RecordId) { $recordId = [int64]$Event.RecordId } } catch { $recordId = $null }
+    try { $taskDisplayName = ConvertTo-SafeString -Value $Event.TaskDisplayName } catch { $taskDisplayName = $null }
+    try { $opcodeDisplayName = ConvertTo-SafeString -Value $Event.OpcodeDisplayName } catch { $opcodeDisplayName = $null }
     try { $keywords = @($Event.KeywordsDisplayNames | ForEach-Object { ConvertTo-SafeString -Value $_ }) } catch { $keywords = @() }
+    try { $message = ConvertTo-SafeString -Value $Event.Message } catch { $message = '<MessageUnavailable>' }
+
     [PSCustomObject]@{
-        TimeCreated = try { if ($Event.TimeCreated) { ([datetime]$Event.TimeCreated).ToString('o') } else { $null } } catch { $null }
-        ProviderName = try { ConvertTo-SafeString -Value $Event.ProviderName } catch { $null }
-        LogName = try { ConvertTo-SafeString -Value $Event.LogName } catch { $null }
-        Id = try { [int]$Event.Id } catch { $null }
-        LevelDisplayName = try { ConvertTo-SafeString -Value $Event.LevelDisplayName } catch { $null }
-        MachineName = try { ConvertTo-SafeString -Value $Event.MachineName } catch { $null }
-        RecordId = try { [int64]$Event.RecordId } catch { $null }
-        TaskDisplayName = try { ConvertTo-SafeString -Value $Event.TaskDisplayName } catch { $null }
-        OpcodeDisplayName = try { ConvertTo-SafeString -Value $Event.OpcodeDisplayName } catch { $null }
+        TimeCreated = $timeCreated
+        ProviderName = $providerName
+        LogName = $logName
+        Id = $eventId
+        LevelDisplayName = $levelDisplayName
+        MachineName = $machineName
+        RecordId = $recordId
+        TaskDisplayName = $taskDisplayName
+        OpcodeDisplayName = $opcodeDisplayName
         KeywordsDisplayNames = $keywords
-        Message = try { ConvertTo-SafeString -Value $Event.Message } catch { '<MessageUnavailable>' }
+        Message = $message
     }
 }
 

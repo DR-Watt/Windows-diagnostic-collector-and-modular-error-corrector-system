@@ -79,6 +79,19 @@ try { $uiValidationSummary = ($uiValidationOutput | Out-String | ConvertFrom-Jso
 catch { throw "UI resource validátor kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)" }
 if (-not [bool]$uiValidationSummary.Valid) { throw "UI resource validációs hiba. Hibák száma: $($uiValidationSummary.ErrorCount)" }
 
+
+Write-EnvLog 'PowerShell szintaxisvalidátor futtatása.'
+$syntaxValidator = Join-Path $RootPath 'validators\Validate-PowerShellSyntax.ps1'
+$syntaxValidationOutput = @(& $syntaxValidator -RootPath $RootPath 2>&1)
+$syntaxValidationSucceeded = $?
+$syntaxValidationOutput | Tee-Object -FilePath $logFile -Append
+if (-not $syntaxValidationSucceeded) { throw 'PowerShell szintaxisvalidátor futási hiba.' }
+try { $syntaxValidationSummary = ($syntaxValidationOutput | Out-String | ConvertFrom-Json -ErrorAction Stop) }
+catch { throw "PowerShell szintaxisvalidátor kimenete nem feldolgozható JSON-ként: $($_.Exception.Message)" }
+if (-not [bool]$syntaxValidationSummary.Valid) {
+    throw "PowerShell szintaxisvalidációs hiba. Hibás fájlok száma: $($syntaxValidationSummary.Failed)"
+}
+
 if ($InstallPSWindowsUpdate) {
     Write-EnvLog 'PSWindowsUpdate telepítés/frissítés indítása.'
     if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {

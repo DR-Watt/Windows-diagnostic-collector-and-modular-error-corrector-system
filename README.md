@@ -1,6 +1,6 @@
-# DiagFramework Windows Update Repair MVP v1.2.1 — Structured AI UI & System Evidence Hotfix
+# DiagFramework Windows Update Repair MVP v1.2.2 — Structured AI UI & System Evidence Hotfix
 
-## v1.2.1 hotfix összefoglaló
+## v1.2.2 hotfix összefoglaló
 
 Ez a build a `SystemEvidenceCollector` hibaszigetelését javítja. A rendszer LOG csomag most már részleges adatforrás-hiba esetén is megpróbál `ai_summary.json`, `collector-progress.jsonl`, `errors/collector-errors.json`, `manifest.json`, `AI_README.md` és ZIP csomagot készíteni.
 
@@ -203,3 +203,27 @@ A v1.2.0 átdolgozás tervezésénél figyelembe vett GitHub repók:
 - `DR-Watt/WindowsMaintenance`
 
 A külső repók nem lettek egy az egyben átmásolva; tervezési mintaként használtam őket: biztonságos mentés, interaktív javítás, DISM/SFC sorrend, GUI tooltip/preview szemlélet, opcionális agresszív műveletek.
+
+
+## v1.2.2 hotfix
+
+### Javítás
+
+A `SystemEvidenceCollector.ps1` modulban a `Convert-EventRecordFlat` függvény PowerShell parser-hibát okozhatott, mert a `[PSCustomObject]@{ ... }` objektumliterál értékei között közvetlen `try { } catch { }` szerkezet szerepelt.
+
+A v1.2.2-ben a védett eseménymező-kiolvasások a hashtable-literal előtt, külön változókba kerülnek, majd ezekből készül az objektum. Ez megszünteti a következő típusú hibát:
+
+```text
+Missing closing '}' in statement block or type definition.
+Unexpected token 'ProviderName' in expression or statement.
+```
+
+### Új validátor
+
+Új fájl:
+
+```text
+validators\Validate-PowerShellSyntax.ps1
+```
+
+A környezeti diagnosztika most már indításkor lefuttatja a PowerShell parser-alapú szintaxisellenőrzést a `.ps1` és `.psm1` fájlokon, így hasonló parse-hiba nem csak a GUI-gomb megnyomásakor derül ki.

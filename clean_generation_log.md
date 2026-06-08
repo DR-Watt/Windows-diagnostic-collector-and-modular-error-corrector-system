@@ -1,79 +1,55 @@
-# CLEAN Generation Log — DiagFramework v1.2.1 SystemEvidence Hotfix
+# CLEAN Generation Log / Changelog
 
-- **GeneratedAt:** 2026-06-08T10:36:19.306686+02:00
-- **Project:** Windows diagnostic collector and modular error corrector system
-- **Version:** 1.2.1
-- **Change type:** Hotfix / robustness hardening
-- **Scope:** CLEAN kódgenerálási LOG, nem futó szoftver által generált rendszer LOG
+## Build metadata
 
-## Cél
+- Project: DiagFramework Windows Update Repair MVP
+- Version: v1.2.2-system-evidence-syntax-hotfix
+- Generated at: 2026-06-08T08:47:30+00:00
+- Generator purpose: Hotfix for SystemEvidenceCollector PowerShell parser error and pre-run syntax validation.
 
-A `SystemEvidenceCollector` modul `Argument types do not match` hibájának megelőzése és a rendszer LOG csomag AI-elemzésének javítása.
+## Change summary
 
-## Hibakép
+### Fixed
 
-A felhasználói futás szerint a GUI logban a rendszer LOG csomag készítése az alábbi hibával állt meg:
+- Fixed `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1` parser error in `Convert-EventRecordFlat`.
+- Removed direct `try { } catch { }` statements from `[PSCustomObject]@{ ... }` property values.
+- Event record fields are now read into local variables before object creation.
 
-```text
-SystemEvidenceCollector csomag hiba: Argument types do not match
-```
+### Added
 
-A feltöltött `collector-progress.jsonl` alapján a futás a `DriverSnapshot` után állt meg. Ez a v1.2.0 kód alapján az eseménynapló-gyűjtés, logmásolás vagy manifest/ZIP szakasz környékére szűkíthető.
+- Added `validators/Validate-PowerShellSyntax.ps1`.
+- Added automatic syntax validation call to `diagnostics/Initialize-DiagEnvironment.ps1`.
 
-## Módosított fájlok
+### Updated
 
-| Fájl | Művelet | Megjegyzés |
-|---|---|---|
-| `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1` | módosítva | v1.2.1 hibaszigetelt gyűjtés, root AI_README generálás, részleges csomag |
-| `modules/SystemEvidenceCollector/manifest.json` | módosítva | verzió és UI magyarázat frissítve |
-| `tools/Collect-SystemEvidence.ps1` | módosítva | `MaxEvents` és opcionális `TargetKB` támogatás |
-| `collect_system_evidence.bat` | módosítva | CLI paraméterek bővítése |
-| `config/ui.hu-HU.json` | módosítva | v1.2.1 szövegek és tooltip |
-| `validators/Validate-SystemEvidencePackage.ps1` | új | SystemEvidence ZIP/mappa szerkezeti validátor |
-| `logs/AI_README.md` | új | LOG gyökér AI útmutató |
-| `logs/evidence_packages/AI_README.md` | új | SystemEvidence gyökér AI útmutató |
-| `logs/ai_packages/AI_README.md` | új | célzott AI csomagok gyökér útmutató |
-| `README.md` | módosítva | v1.2.1 használati leírás |
-| `clean_generation_log.md` | módosítva | Markdown changelog/build log |
+- Updated `modules/SystemEvidenceCollector/manifest.json` to version `1.2.2`.
+- Updated README with the v1.2.2 hotfix notes.
 
-## Technikai javítások
+## Modified files
 
-1. A rendszer LOG gyűjtés már nem egyetlen törékeny folyamatlánc.
-2. Minden fő lépés saját hibakezelést és `collector-progress.jsonl` bejegyzést kap.
-3. A `Get-WinEvent` kimenet laposított, serializálható objektummá alakul.
-4. A registry értékek mély .NET objektumok helyett név/érték párokká alakulnak.
-5. A relatív útvonal-képzés típusbiztos wrapperbe került.
-6. A ZIP-manifest készítés hibája nem akadályozza meg az addig létrejött csomag elemzését.
-7. A `logs` és `logs/evidence_packages` gyökér is kap AI_README fájlt.
+- `modules/SystemEvidenceCollector/SystemEvidenceCollector.ps1`
+- `modules/SystemEvidenceCollector/manifest.json`
+- `diagnostics/Initialize-DiagEnvironment.ps1`
+- `validators/Validate-PowerShellSyntax.ps1`
+- `README.md`
+- `clean_generation_log.md`
 
-## Futtatási sorrend
+## Runtime order
 
-```powershell
-Set-Location C:\DIAG\DiagFramework_WURepair_MVP_v1_2_1_system_evidence_hotfix
-.\install_and_run.bat
-```
+1. `install_and_run.bat`
+2. `diagnostics/Initialize-DiagEnvironment.ps1`
+3. `validators/Validate-Manifests.ps1`
+4. `validators/Validate-UiResources.ps1`
+5. `validators/Validate-PowerShellSyntax.ps1`
+6. `Launcher.ps1`
+7. GUI action: `SystemEvidenceCollector` / `Collect-SystemEvidence.ps1`
 
-CLI rendszer LOG gyűjtés:
+## Validation notes
 
-```powershell
-.\tools\Collect-SystemEvidence.ps1 -DaysBack 30 -MaxEvents 1200 -TargetKB KB5089573
-```
+- JSON files were parsed successfully during package generation.
+- ZIP integrity was checked after package creation.
+- PowerShell runtime parser validation cannot be executed inside this Linux container because `pwsh` is not available here; the included validator runs on the target Windows/PowerShell 7 environment before the GUI starts.
 
-Validálás:
+## Known limitations
 
-```powershell
-.\validators\Validate-SystemEvidencePackage.ps1 -PackagePath .\logs\evidence_packages\<package>.zip
-```
-
-## Ismert korlátok
-
-- Windows runtime tesztet ebben a környezetben nem lehetett futtatni.
-- Egyes eseménynaplók hiányozhatnak vagy jogosultság miatt nem olvashatók; ez `errors/collector-errors.json` alatt jelenik meg.
-- A vendor loggyűjtés fájlszám- és méretkorláttal dolgozik.
-
-## Validáció
-
-- JSON fájlok szintaxisa ellenőrizve.
-- ZIP integritás ellenőrizve.
-- Patch ZIP integritás ellenőrizve.
-
+- Some Windows Event Logs or vendor diagnostic paths may be inaccessible depending on permissions or installed hardware/vendor tooling. These cases are expected to be recorded in `errors/collector-errors.json`, not treated as fatal collector failures.
