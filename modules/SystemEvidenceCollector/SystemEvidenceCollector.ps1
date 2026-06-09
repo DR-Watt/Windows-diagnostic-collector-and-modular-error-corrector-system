@@ -2,7 +2,7 @@
 .SYNOPSIS
   Windows 11 rendszerbizonyíték és vendor diagnosztikai LOG gyűjtő modul.
 .DESCRIPTION
-  v1.4.1 P0 Evidence Bridge Pack for P1 Normalizers v1.4.0.
+  v1.4.2 P0 Evidence Bridge Syntax Hotfix for P1 Normalizers v1.4.0.
   Read-only evidence gyűjtés + Baunok hiányosság-pótlás: CbsPersist teljesebb
   gyűjtés, minidump CDB/WinDbg batch evidence, repair source advisor, KB-context
   handoff és P1 v1.4.0 normalizáló-kompatibilis átadási JSON-ok. Továbbra sem
@@ -20,7 +20,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ModuleId = 'SystemEvidenceCollector'
-$ModuleVersion = '1.4.1'
+$ModuleVersion = '1.4.2'
 $P1NormalizerCompatibleVersion = '1.4.0'
 
 function Get-Metadata {
@@ -78,7 +78,7 @@ function Write-JsonSafe {
             TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
             JsonSerializationFailed = $true
             Error = $_.Exception.Message
-            Text = ConvertTo-SafeString ($InputObject | Out-String)
+            Text = (ConvertTo-SafeString ($InputObject | Out-String))
         } | ConvertTo-Json -Depth 6 | Out-File -LiteralPath $Path -Encoding UTF8 -Force
     }
 }
@@ -95,7 +95,7 @@ function Write-JsonLinesSafe {
                 SchemaVersion = 'diagframework.jsonl.fallback.v1'
                 TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
                 Error = $_.Exception.Message
-                Text = ConvertTo-SafeString ($item | Out-String)
+                Text = (ConvertTo-SafeString ($item | Out-String))
             } | ConvertTo-Json -Depth 6 -Compress | Out-File -LiteralPath $Path -Encoding UTF8 -Append
         }
     }
@@ -251,17 +251,17 @@ function Convert-EventRecordFlat {
     try { $recordId = [int64]$Event.RecordId } catch { }
     [PSCustomObject]@{
         TimeCreated = $time
-        ProviderName = ConvertTo-SafeString $Event.ProviderName
-        LogName = ConvertTo-SafeString $Event.LogName
+        ProviderName = (ConvertTo-SafeString $Event.ProviderName)
+        LogName = (ConvertTo-SafeString $Event.LogName)
         Id = $id
-        LevelDisplayName = ConvertTo-SafeString $Event.LevelDisplayName
-        Level = ConvertTo-SafeString $Event.Level
-        MachineName = ConvertTo-SafeString $Event.MachineName
+        LevelDisplayName = (ConvertTo-SafeString $Event.LevelDisplayName)
+        Level = (ConvertTo-SafeString $Event.Level)
+        MachineName = (ConvertTo-SafeString $Event.MachineName)
         RecordId = $recordId
-        TaskDisplayName = ConvertTo-SafeString $Event.TaskDisplayName
-        OpcodeDisplayName = ConvertTo-SafeString $Event.OpcodeDisplayName
-        KeywordsDisplayNames = ConvertTo-SafeString $Event.KeywordsDisplayNames
-        Message = ConvertTo-SafeString $Event.Message
+        TaskDisplayName = (ConvertTo-SafeString $Event.TaskDisplayName)
+        OpcodeDisplayName = (ConvertTo-SafeString $Event.OpcodeDisplayName)
+        KeywordsDisplayNames = (ConvertTo-SafeString $Event.KeywordsDisplayNames)
+        Message = (ConvertTo-SafeString $Event.Message)
     }
 }
 
@@ -306,9 +306,9 @@ function Get-SystemSnapshot {
         UserName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
         TimestampUtc = (Get-Date).ToUniversalTime().ToString('o')
         PowerShell = [PSCustomObject]@{ Version = $PSVersionTable.PSVersion.ToString(); Edition = $PSVersionTable.PSEdition; Platform = $PSVersionTable.Platform }
-        OS = if ($os) { ConvertTo-FlatObject $os @('Caption','Version','BuildNumber','OSArchitecture','InstallDate','LastBootUpTime') } else { $null }
-        ComputerSystem = if ($cs) { ConvertTo-FlatObject $cs @('Manufacturer','Model','SystemType','TotalPhysicalMemory','HypervisorPresent') } else { $null }
-        BIOS = if ($bios) { ConvertTo-FlatObject $bios @('Manufacturer','SMBIOSBIOSVersion','ReleaseDate','SerialNumber') } else { $null }
+        OS = $(if ($os) { ConvertTo-FlatObject $os @('Caption','Version','BuildNumber','OSArchitecture','InstallDate','LastBootUpTime') } else { $null })
+        ComputerSystem = $(if ($cs) { ConvertTo-FlatObject $cs @('Manufacturer','Model','SystemType','TotalPhysicalMemory','HypervisorPresent') } else { $null })
+        BIOS = $(if ($bios) { ConvertTo-FlatObject $bios @('Manufacturer','SMBIOSBIOSVersion','ReleaseDate','SerialNumber') } else { $null })
     }
 }
 
@@ -535,11 +535,11 @@ function Invoke-NativeCommandSafe {
         StartTime=$start.ToString('o')
         EndTime=$end.ToString('o')
         DurationMs=[int](($end-$start).TotalMilliseconds)
-        StdOut=Get-RelativePathSafe $PackageRoot $outFile
-        StdErr=Get-RelativePathSafe $PackageRoot $errFile
+        StdOut=(Get-RelativePathSafe $PackageRoot $outFile)
+        StdErr=(Get-RelativePathSafe $PackageRoot $errFile)
         StdOutBytes=$stdoutBytes
         StdErrBytes=$stderrBytes
-        InformationValue=if($errorText){'LaunchError'}elseif($stdoutBytes -gt 0 -or $stderrBytes -gt 0){'Captured'}else{'NoOutput'}
+        InformationValue=$(if($errorText){'LaunchError'}elseif($stdoutBytes -gt 0 -or $stderrBytes -gt 0){'Captured'}else{'NoOutput'})
         StdOutPreview=$stdoutPreview
         StdErrPreview=$stderrPreview
         Error=$errorText
@@ -810,7 +810,7 @@ function New-DiskDeviceCorrelation {
             ControllerSnapshot = $Controllers
             StorageDriverSnapshot = $Drivers
             PnpStorageDevices = $PnpDevices
-            Interpretation = if ($hint) { 'User context maps this disk to the onboard Intel RAID controller JBOD SATA HDD group.' } else { 'No explicit user-provided disk hint matched this disk number.' }
+            Interpretation = $(if ($hint) { 'User context maps this disk to the onboard Intel RAID controller JBOD SATA HDD group.' } else { 'No explicit user-provided disk hint matched this disk number.' })
         }
     }
     return $correlation
@@ -838,8 +838,8 @@ function Get-EventCorrelationWindowSafe {
                     LogName = $ev.LogName
                     ProviderName = $ev.ProviderName
                     Id = $ev.Id
-                    TimeCreated = if ($ev.TimeCreated) { ([datetime]$ev.TimeCreated).ToString('o') } else { $null }
-                    LevelDisplayName = ConvertTo-SafeString $ev.LevelDisplayName
+                    TimeCreated = $(if ($ev.TimeCreated) { ([datetime]$ev.TimeCreated).ToString('o') } else { $null })
+                    LevelDisplayName = (ConvertTo-SafeString $ev.LevelDisplayName)
                     RecordId = $ev.RecordId
                     MessagePreview = (ConvertTo-SafeString $ev.Message)
                 }
@@ -920,16 +920,16 @@ function New-RaidVolumeMap {
             $items += [PSCustomObject]@{
                 DiskNumber=$number
                 Classification=$class
-                FriendlyName=Get-PropertyFromFlatObjectSafe $d 'FriendlyName'
-                Model=Get-PropertyFromFlatObjectSafe $d 'Model'
-                SizeBytes=Get-PropertyFromFlatObjectSafe $d 'Size'
-                SizeTiB=Convert-BytesToTiBSafe -Bytes (Get-PropertyFromFlatObjectSafe $d 'Size')
-                UniqueId=Get-PropertyFromFlatObjectSafe $d 'UniqueId'
-                Path=Get-PropertyFromFlatObjectSafe $d 'Path'
-                Win32Model=Get-PropertyFromFlatObjectSafe $cimDisk 'Model'
-                Win32PNPDeviceID=Get-PropertyFromFlatObjectSafe $cimDisk 'PNPDeviceID'
-                PhysicalDiskFriendlyName=Get-PropertyFromFlatObjectSafe $phys 'FriendlyName'
-                PhysicalDiskSerialNumber=Get-PropertyFromFlatObjectSafe $phys 'SerialNumber'
+                FriendlyName=(Get-PropertyFromFlatObjectSafe $d 'FriendlyName')
+                Model=(Get-PropertyFromFlatObjectSafe $d 'Model')
+                SizeBytes=(Get-PropertyFromFlatObjectSafe $d 'Size')
+                SizeTiB=(Convert-BytesToTiBSafe -Bytes (Get-PropertyFromFlatObjectSafe $d 'Size'))
+                UniqueId=(Get-PropertyFromFlatObjectSafe $d 'UniqueId')
+                Path=(Get-PropertyFromFlatObjectSafe $d 'Path')
+                Win32Model=(Get-PropertyFromFlatObjectSafe $cimDisk 'Model')
+                Win32PNPDeviceID=(Get-PropertyFromFlatObjectSafe $cimDisk 'PNPDeviceID')
+                PhysicalDiskFriendlyName=(Get-PropertyFromFlatObjectSafe $phys 'FriendlyName')
+                PhysicalDiskSerialNumber=(Get-PropertyFromFlatObjectSafe $phys 'SerialNumber')
             }
         }
     }
@@ -944,23 +944,23 @@ function New-PhysicalDiskCandidateMap {
         $items += [PSCustomObject]@{
             Source='Get-PhysicalDisk'
             CandidateRole=$class
-            DeviceId=Get-PropertyFromFlatObjectSafe $p 'DeviceId'
-            FriendlyName=Get-PropertyFromFlatObjectSafe $p 'FriendlyName'
-            Manufacturer=Get-PropertyFromFlatObjectSafe $p 'Manufacturer'
-            Model=Get-PropertyFromFlatObjectSafe $p 'Model'
-            SerialNumber=Get-PropertyFromFlatObjectSafe $p 'SerialNumber'
-            SizeBytes=Get-PropertyFromFlatObjectSafe $p 'Size'
-            SizeTiB=Convert-BytesToTiBSafe -Bytes (Get-PropertyFromFlatObjectSafe $p 'Size')
-            HealthStatus=Get-PropertyFromFlatObjectSafe $p 'HealthStatus'
-            OperationalStatus=Get-PropertyFromFlatObjectSafe $p 'OperationalStatus'
-            BusType=Get-PropertyFromFlatObjectSafe $p 'BusType'
-            IsPartial=Get-PropertyFromFlatObjectSafe $p 'IsPartial'
+            DeviceId=(Get-PropertyFromFlatObjectSafe $p 'DeviceId')
+            FriendlyName=(Get-PropertyFromFlatObjectSafe $p 'FriendlyName')
+            Manufacturer=(Get-PropertyFromFlatObjectSafe $p 'Manufacturer')
+            Model=(Get-PropertyFromFlatObjectSafe $p 'Model')
+            SerialNumber=(Get-PropertyFromFlatObjectSafe $p 'SerialNumber')
+            SizeBytes=(Get-PropertyFromFlatObjectSafe $p 'Size')
+            SizeTiB=(Convert-BytesToTiBSafe -Bytes (Get-PropertyFromFlatObjectSafe $p 'Size'))
+            HealthStatus=(Get-PropertyFromFlatObjectSafe $p 'HealthStatus')
+            OperationalStatus=(Get-PropertyFromFlatObjectSafe $p 'OperationalStatus')
+            BusType=(Get-PropertyFromFlatObjectSafe $p 'BusType')
+            IsPartial=(Get-PropertyFromFlatObjectSafe $p 'IsPartial')
         }
     }
     foreach ($pnp in @($PnpDevices | Where-Object { $_.Class -eq 'DiskDrive' -and $_.Present -eq $true })) {
         $items += [PSCustomObject]@{
             Source='Get-PnpDevice'
-            CandidateRole=if ([string]$pnp.FriendlyName -match '(?i)ST\d+|Seagate') { 'PresentSeagateHddCandidate' } elseif ([string]$pnp.FriendlyName -match '(?i)Raid') { 'PresentRaidVolumeCandidate' } else { 'PresentDiskCandidate' }
+            CandidateRole=$(if ([string]$pnp.FriendlyName -match '(?i)ST\d+|Seagate') { 'PresentSeagateHddCandidate' } elseif ([string]$pnp.FriendlyName -match '(?i)Raid') { 'PresentRaidVolumeCandidate' } else { 'PresentDiskCandidate' })
             DeviceId=$null
             FriendlyName=$pnp.FriendlyName
             Manufacturer=$null
@@ -993,12 +993,12 @@ function New-DetectedStorageTopology {
             DiskNumber=$c.DiskNumber
             Event153Count=$c.Event153Count
             Classification=$class
-            FriendlyName=Get-PropertyFromFlatObjectSafe $disk 'FriendlyName'
-            Model=Get-PropertyFromFlatObjectSafe $disk 'Model'
-            SizeBytes=Get-PropertyFromFlatObjectSafe $disk 'Size'
-            SizeTiB=Convert-BytesToTiBSafe -Bytes (Get-PropertyFromFlatObjectSafe $disk 'Size')
-            Win32Model=Get-PropertyFromFlatObjectSafe $cimDisk 'Model'
-            Win32PNPDeviceID=Get-PropertyFromFlatObjectSafe $cimDisk 'PNPDeviceID'
+            FriendlyName=(Get-PropertyFromFlatObjectSafe $disk 'FriendlyName')
+            Model=(Get-PropertyFromFlatObjectSafe $disk 'Model')
+            SizeBytes=(Get-PropertyFromFlatObjectSafe $disk 'Size')
+            SizeTiB=(Convert-BytesToTiBSafe -Bytes (Get-PropertyFromFlatObjectSafe $disk 'Size'))
+            Win32Model=(Get-PropertyFromFlatObjectSafe $cimDisk 'Model')
+            Win32PNPDeviceID=(Get-PropertyFromFlatObjectSafe $cimDisk 'PNPDeviceID')
             DriveLetters=$driveLetters
             VolumeLabels=$labels
             PdoObjectNames=$c.PdoObjectNames
@@ -1068,12 +1068,12 @@ function Test-StorageHintAgainstDetected {
     }
     [PSCustomObject]@{
         SchemaVersion='diagframework.storage.hint.validation.v1'
-        Result=if ($mismatches.Count -gt 0) { 'MismatchDetected' } else { 'NoMismatchDetected' }
+        Result=$(if ($mismatches.Count -gt 0) { 'MismatchDetected' } else { 'NoMismatchDetected' })
         UserProvidedTopology=$Hints
         DetectedTopologyReference='storage/detected-storage-topology.json'
         Matches=$matches
         Mismatches=$mismatches
-        Recommendation=if ($mismatches.Count -gt 0) { 'Do not use the user hint as a fact. Review detected-storage-topology.json, raid-volume-map.json and physical-disk-candidate-map.json.' } else { 'User hint and detected topology do not materially conflict based on current rules.' }
+        Recommendation=$(if ($mismatches.Count -gt 0) { 'Do not use the user hint as a fact. Review detected-storage-topology.json, raid-volume-map.json and physical-disk-candidate-map.json.' } else { 'User hint and detected topology do not materially conflict based on current rules.' })
     }
 }
 
@@ -1109,10 +1109,10 @@ function New-TargetKbCorrelation {
     [PSCustomObject]@{
         SchemaVersion='diagframework.targetkb.correlation.v1'
         TargetKB=$TargetKB
-        Status=if ($matches.Count -gt 0) { 'DirectMatchInCorrelationWindow' } else { 'NoDirectMatchInCorrelationWindow' }
+        Status=$(if ($matches.Count -gt 0) { 'DirectMatchInCorrelationWindow' } else { 'NoDirectMatchInCorrelationWindow' })
         DirectMatchCount=$matches.Count
         Matches=$matches
-        Meaning=if ($matches.Count -gt 0) { 'The target KB appears near one or more Disk 153 correlation windows.' } else { 'No direct target KB text match was found in Disk 153 correlation windows. This does not exclude indirect storage/update interaction.' }
+        Meaning=$(if ($matches.Count -gt 0) { 'The target KB appears near one or more Disk 153 correlation windows.' } else { 'No direct target KB text match was found in Disk 153 correlation windows. This does not exclude indirect storage/update interaction.' })
     }
 }
 
@@ -1312,10 +1312,10 @@ function Collect-StorageEvidence {
         TopFindings=$topFindings
         RiskIndicators=$riskIndicators
         SuggestedNextEvidence=$suggestedNextEvidence
-        EvidenceGapSummary=$evidenceGapSummary
-        EvidenceGapCount=try { [int]$evidenceGapSummary.GapCount } catch { 0 }
-        ServicingRiskSummary=$servicingRiskSummary
-        WindowsUpdateSignalSummary=$windowsUpdateSignalSummary
+        EvidenceGapSummary=$null
+        EvidenceGapCount=0
+        ServicingRiskSummary=$null
+        WindowsUpdateSignalSummary=$null
         P1NormalizerHandoff=@('WERNormalizer','SetupAPINormalizer','CBSHResultNormalizer','DriverPnPProblemNormalizer','EventCorrelationNormalizer','WindowsUpdateErrorNormalizer')
     }
 }
@@ -1348,21 +1348,21 @@ function Read-WerReportFile {
     $file = $null
     try { $file = Get-Item -LiteralPath $Path -ErrorAction Stop } catch { }
     [PSCustomObject]@{
-        RelativePath = Get-RelativePathSafe $PackageRoot $Path
-        LastWriteTime = if ($file) { $file.LastWriteTime.ToString('o') } else { $null }
-        Length = if ($file) { $file.Length } else { $null }
-        EventType = Get-WerValueSafe $kv 'EventType'
-        FriendlyEventName = Get-WerValueSafe $kv 'FriendlyEventName'
-        AppName = Get-WerValueSafe $kv 'AppName'
-        Sig0Name = Get-WerValueSafe $kv 'Sig[0].Name'
-        Sig0 = Get-WerValueSafe $kv 'Sig[0].Value'
-        Sig1Name = Get-WerValueSafe $kv 'Sig[1].Name'
-        Sig1 = Get-WerValueSafe $kv 'Sig[1].Value'
-        Sig2Name = Get-WerValueSafe $kv 'Sig[2].Name'
-        Sig2 = Get-WerValueSafe $kv 'Sig[2].Value'
-        Sig3Name = Get-WerValueSafe $kv 'Sig[3].Name'
-        Sig3 = Get-WerValueSafe $kv 'Sig[3].Value'
-        ReportId = Get-WerValueSafe $kv 'ReportIdentifier'
+        RelativePath = (Get-RelativePathSafe $PackageRoot $Path)
+        LastWriteTime = $(if ($file) { $file.LastWriteTime.ToString('o') } else { $null })
+        Length = $(if ($file) { $file.Length } else { $null })
+        EventType = (Get-WerValueSafe $kv 'EventType')
+        FriendlyEventName = (Get-WerValueSafe $kv 'FriendlyEventName')
+        AppName = (Get-WerValueSafe $kv 'AppName')
+        Sig0Name = (Get-WerValueSafe $kv 'Sig[0].Name')
+        Sig0 = (Get-WerValueSafe $kv 'Sig[0].Value')
+        Sig1Name = (Get-WerValueSafe $kv 'Sig[1].Name')
+        Sig1 = (Get-WerValueSafe $kv 'Sig[1].Value')
+        Sig2Name = (Get-WerValueSafe $kv 'Sig[2].Name')
+        Sig2 = (Get-WerValueSafe $kv 'Sig[2].Value')
+        Sig3Name = (Get-WerValueSafe $kv 'Sig[3].Name')
+        Sig3 = (Get-WerValueSafe $kv 'Sig[3].Value')
+        ReportId = (Get-WerValueSafe $kv 'ReportIdentifier')
     }
 }
 
@@ -1467,10 +1467,10 @@ function New-PackageManifestSafe {
     foreach ($child in @(Get-ChildItem -LiteralPath $PackageRoot -File -Recurse -ErrorAction SilentlyContinue)) {
         try {
             $files += [PSCustomObject]@{
-                RelativePath = Get-RelativePathSafe $PackageRoot $child.FullName
+                RelativePath = (Get-RelativePathSafe $PackageRoot $child.FullName)
                 Length = $child.Length
                 LastWriteTime = $child.LastWriteTime.ToString('o')
-                SHA256 = Get-FileHashSafe $child.FullName
+                SHA256 = (Get-FileHashSafe $child.FullName)
             }
         } catch { }
     }
@@ -1593,7 +1593,7 @@ function New-ServicingRiskSummary {
     if ($dismScanText -match 'repairable|sérült|corruption|component store') { $highSignal = $true; $reasons += 'DISM ScanHealth text contains repair/corruption-related wording.' }
     [PSCustomObject]@{
         SchemaVersion='diagframework.servicing.risk.summary.v1'
-        Status=if ($highSignal) { 'SignalDetected' } else { 'NoStrongSignal' }
+        Status=$(if ($highSignal) { 'SignalDetected' } else { 'NoStrongSignal' })
         TopHResults=$topHResults
         DismScanHealthFile='servicing/dism-scanhealth.txt'
         SfcVerifyOnlyFile='servicing/sfc-verifyonly.txt'
@@ -1619,7 +1619,7 @@ function New-WindowsUpdateSignalSummary {
         LogPath='windows_update/WindowsUpdate.generated.log'
         LogPresent=(Test-Path -LiteralPath $logPath)
         TargetKB=$TargetKB
-        TargetKBDirectMatchCount=if ($targetMatches.Count -gt 0) { [int]$targetMatches[0].Count } else { 0 }
+        TargetKBDirectMatchCount=$(if ($targetMatches.Count -gt 0) { [int]$targetMatches[0].Count } else { 0 })
         TopErrorCodes=$hresults
         TopKBs=$kbMatches
         SuggestedNormalizer='WindowsUpdateErrorNormalizer'
@@ -1690,7 +1690,7 @@ function New-P0EvidenceGapSummary {
         }
     } catch { }
     [PSCustomObject]@{
-        SchemaVersion='diagframework.p0.evidence.gap.summary.v1.4.1'
+        SchemaVersion='diagframework.p0.evidence.gap.summary.v1.4.2'
         CompatibleP1Version=$P1NormalizerCompatibleVersion
         Source='P0EvidenceCollectorRuntime'
         GapCount=@($gaps).Count
@@ -1827,7 +1827,7 @@ function Collect-CbsPersistEvidence {
     $extractedCount = @($inventory | Where-Object { $_.Extracted }).Count
     $summary = [PSCustomObject]@{
         SchemaVersion='diagframework.cbs.persist.collection.summary.v1'
-        Status=if($cbsCount -gt 0 -or $dismCount -gt 0){'Collected'}else{'NoLogsFound'}
+        Status=$(if($cbsCount -gt 0 -or $dismCount -gt 0){'Collected'}else{'NoLogsFound'})
         CbsLogCount=$cbsCount
         DismLogCount=$dismCount
         CbsPersistCabCount=$cabCount
@@ -1878,7 +1878,7 @@ function Invoke-MiniDumpCdbAnalysis {
     if ([string]::IsNullOrWhiteSpace($cdb)) {
         foreach ($dump in $dumps) {
             $results += [PSCustomObject]@{
-                dumpFile=Get-RelativePathSafe $PackageRoot $dump.FullName
+                dumpFile=(Get-RelativePathSafe $PackageRoot $dump.FullName)
                 dumpTimestampLocal=$dump.LastWriteTime.ToString('o')
                 analysisStatus='CdbNotFound'
                 bugCheckCode=$null; bugCheckName=$null; bugCheckParameters=@(); probablyCausedBy=$null; moduleName=$null; imageName=$null; failureBucketId=$null; processName=$null
@@ -1926,25 +1926,25 @@ function Invoke-MiniDumpCdbAnalysis {
             $text = ''
             try { if (Test-Path -LiteralPath $rawLog) { $text = Get-Content -LiteralPath $rawLog -Raw -ErrorAction SilentlyContinue } } catch { $text = '' }
             $results += [PSCustomObject]@{
-                dumpFile=Get-RelativePathSafe $PackageRoot $dump.FullName
+                dumpFile=(Get-RelativePathSafe $PackageRoot $dump.FullName)
                 dumpTimestampLocal=$dump.LastWriteTime.ToString('o')
                 analysisStatus=$analysisStatus
-                bugCheckCode=Get-RegexValueSafe -Text $text -Pattern '(?im)^BugCheck\s+([^,\r\n]+)'
-                bugCheckName=Get-RegexValueSafe -Text $text -Pattern '(?im)^([A-Z_]+)\s+\([0-9a-fA-Fx]+'
+                bugCheckCode=(Get-RegexValueSafe -Text $text -Pattern '(?im)^BugCheck\s+([^,\r\n]+)')
+                bugCheckName=(Get-RegexValueSafe -Text $text -Pattern '(?im)^([A-Z_]+)\s+\([0-9a-fA-Fx]+')
                 bugCheckParameters=@()
-                probablyCausedBy=Get-RegexValueSafe -Text $text -Pattern '(?im)^Probably caused by\s*:\s*(.+)$'
-                moduleName=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*MODULE_NAME:\s*(.+)$'
-                imageName=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*IMAGE_NAME:\s*(.+)$'
-                failureBucketId=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*FAILURE_BUCKET_ID:\s*(.+)$'
-                processName=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*PROCESS_NAME:\s*(.+)$'
+                probablyCausedBy=(Get-RegexValueSafe -Text $text -Pattern '(?im)^Probably caused by\s*:\s*(.+)$')
+                moduleName=(Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*MODULE_NAME:\s*(.+)$')
+                imageName=(Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*IMAGE_NAME:\s*(.+)$')
+                failureBucketId=(Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*FAILURE_BUCKET_ID:\s*(.+)$')
+                processName=(Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*PROCESS_NAME:\s*(.+)$')
                 stackTextExtracted=($text -match '(?im)^STACK_TEXT:')
                 loadedModulesExtracted=($text -match '(?im)^start\s+end\s+module name|^Loaded Module List')
                 hasBlackboxBSD=($text -match '(?i)BLACKBOXBSD|BlackBoxBSD')
                 hasBlackboxPNP=($text -match '(?i)BLACKBOXPNP|BlackBoxPNP')
                 hasBlackboxNTFS=($text -match '(?i)BLACKBOXNTFS|BlackBoxNTFS')
                 hasBlackboxWinlogon=($text -match '(?i)BLACKBOXWINLOGON|BlackBoxWinlogon')
-                rawLogPath=if(Test-Path -LiteralPath $rawLog){Get-RelativePathSafe $PackageRoot $rawLog}else{$null}
-                xmlPath=if(Test-Path -LiteralPath $xmlPath){Get-RelativePathSafe $PackageRoot $xmlPath}else{$null}
+                rawLogPath=$(if(Test-Path -LiteralPath $rawLog){Get-RelativePathSafe $PackageRoot $rawLog}else{$null})
+                xmlPath=$(if(Test-Path -LiteralPath $xmlPath){Get-RelativePathSafe $PackageRoot $xmlPath}else{$null})
                 confidence='NeedsManualReview'
                 notes=@($errorText) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
             }
@@ -1972,7 +1972,7 @@ function Invoke-MiniDumpCdbAnalysis {
 
     $summary = [PSCustomObject]@{
         SchemaVersion='diagframework.windbg.analysis.summary.v1'
-        Status=if(-not $discovery.CdbFound){'CdbNotFound'}elseif(@($results | Where-Object {$_.analysisStatus -eq 'Success'}).Count -gt 0){'Analyzed'}else{'AnalysisFailed'}
+        Status=$(if(-not $discovery.CdbFound){'CdbNotFound'}elseif(@($results | Where-Object {$_.analysisStatus -eq 'Success'}).Count -gt 0){'Analyzed'}else{'AnalysisFailed'})
         CdbFound=$discovery.CdbFound
         CdbPath=$discovery.CdbPath
         DumpCount=@($dumps).Count
@@ -2021,9 +2021,9 @@ function New-RepairSourceAdvisor {
     $hasRepairMissing = @($signals | Where-Object { $_.Category -eq 'RepairSourceMissing' }).Count -gt 0
     $advisor = [PSCustomObject]@{
         SchemaVersion='diagframework.repair.source.advisor.v1'
-        Status=if($hasRepairMissing){'RepairSourceIssueCandidate'}elseif(@($signals).Count -gt 0){'ServicingSignalsDetected'}else{'NoRepairSourceSignal'}
+        Status=$(if($hasRepairMissing){'RepairSourceIssueCandidate'}elseif(@($signals).Count -gt 0){'ServicingSignalsDetected'}else{'NoRepairSourceSignal'})
         Signals=$signals
-        SuggestedFirstAction=if($hasRepairMissing){'Prefer DISM repair-source investigation before generic Windows Update reset.'}else{'No repair-source-specific action from P0 evidence.'}
+        SuggestedFirstAction=$(if($hasRepairMissing){'Prefer DISM repair-source investigation before generic Windows Update reset.'}else{'No repair-source-specific action from P0 evidence.'})
         ReadOnly=$true
         RepairModeRequiredForFix=$true
         ExampleCommands=@(
@@ -2078,7 +2078,7 @@ function New-KBContextHandoff {
         TargetKBMatchedFiles=$targetMatches
         TopKBs=$topKbs
         TopErrorCodes=$topErrors
-        Assessment=if([string]::IsNullOrWhiteSpace($target)){'NoTargetKBRequested'}elseif(@($targetMatches).Count -gt 0){'TargetKBSignalsPresent'}else{'NoDirectTargetKBMatch'}
+        Assessment=$(if([string]::IsNullOrWhiteSpace($target)){'NoTargetKBRequested'}elseif(@($targetMatches).Count -gt 0){'TargetKBSignalsPresent'}else{'NoDirectTargetKBMatch'})
         P1Handoff=@('WindowsUpdateErrorNormalizer','CBSHResultNormalizer','EventCorrelationNormalizer')
     }
     Write-JsonSafe -InputObject $handoff -Path (Join-Path $PackageRoot 'analysis/kb-context-handoff.json') -Depth 12
@@ -2093,10 +2093,10 @@ function New-SummaryObject {
         Where-Object { [bool](Get-ObjectPropertyValueSafe -Object $_ -Name 'Truncated' -Default $false) } |
         ForEach-Object {
             [PSCustomObject]@{
-                LogName = Get-ObjectPropertyValueSafe -Object $_ -Name 'LogName' -Default ''
-                Count = Get-ObjectPropertyValueSafe -Object $_ -Name 'Count' -Default 0
-                OutputFile = Get-ObjectPropertyValueSafe -Object $_ -Name 'OutputFile' -Default ''
-                OutputEvtx = Get-ObjectPropertyValueSafe -Object $_ -Name 'OutputEvtx' -Default $null
+                LogName = (Get-ObjectPropertyValueSafe -Object $_ -Name 'LogName' -Default '')
+                Count = (Get-ObjectPropertyValueSafe -Object $_ -Name 'Count' -Default 0)
+                OutputFile = (Get-ObjectPropertyValueSafe -Object $_ -Name 'OutputFile' -Default '')
+                OutputEvtx = (Get-ObjectPropertyValueSafe -Object $_ -Name 'OutputEvtx' -Default $null)
                 Note = 'JSONL truncated; raw EVTX available when OutputEvtx is populated.'
             }
         }
@@ -2120,7 +2120,7 @@ function New-SummaryObject {
         }
     } catch { }
     [PSCustomObject]@{
-        SchemaVersion='diagframework.systemevidence.summary.v4.1'
+        SchemaVersion='diagframework.systemevidence.summary.v4.2'
         ModuleId=$ModuleId
         ModuleVersion=$ModuleVersion
         Status=$Status
@@ -2167,7 +2167,7 @@ function Invoke-EvidenceCollection {
     $issues=@(); $eventSummary=@(); $copied=@(); $nativeResults=@(); $p0Results=@()
     Add-ProgressEvent $packageRoot 'Start' 'OK' "DaysBack=$DaysBack MaxEvents=$MaxEvents TargetKB=$TargetKB WhatIf=$($WhatIf.IsPresent)"
     if ($WhatIf) {
-        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v4.1'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256','Storage controller correlation','Disk 153 timeline','User hint vs detected topology validation','RAID volume map','Physical disk candidate map','Target KB correlation','TopFindings/RiskIndicators/SuggestedNextEvidence','Baunok evidence-gap summary','Servicing risk summary','WindowsUpdate signal summary','P1 normalizer handoff readiness') }
+        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v4.2'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256','Storage controller correlation','Disk 153 timeline','User hint vs detected topology validation','RAID volume map','Physical disk candidate map','Target KB correlation','TopFindings/RiskIndicators/SuggestedNextEvidence','Baunok evidence-gap summary','Servicing risk summary','WindowsUpdate signal summary','P1 normalizer handoff readiness') }
         Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
         return $summary
     }

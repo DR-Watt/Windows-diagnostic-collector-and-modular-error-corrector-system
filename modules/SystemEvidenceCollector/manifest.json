@@ -1,14 +1,14 @@
 {
   "Id": "SystemEvidenceCollector",
   "Name": "Rendszer LOG bizonyítékgyűjtő",
-  "Version": "1.4.1",
+  "Version": "1.4.2",
   "Author": "DiagTeam",
   "Script": "SystemEvidenceCollector.ps1",
   "Risk": "Low",
   "Category": "EvidenceCollection",
-  "Description": "Windows 11 P0 read-only evidence bridge P1 v1.4.0 normalizálókhoz: CbsPersist teljesebb gyűjtés, minidump CDB/WinDbg batch evidence, repair-source advisor, KB-context handoff és Baunok hiányosság-pótlás.",
+  "Description": "Windows 11 P0 read-only evidence bridge P1 v1.4.0 normalizálókhoz. v1.4.2 syntax hotfix: PSCustomObject hashtable value command expressions parenthesized, v1.4.1 bootstrap syntax validation failure corrected.",
   "Ui": {
-    "Summary": "Rendszerszintű P0 evidence bridge csomagot készít a P1 v1.4.0 normalizálókhoz. A v1.4.1 a Baunok elemzés alapján pótolja a CBS persistens naplók, DISM logok, minidump/CDB elemzés, repair-source advisor és KB-context handoff hiányait. A modul továbbra is read-only, javítást nem végez.",
+    "Summary": "Rendszerszintű P0 evidence bridge csomagot készít a P1 v1.4.0 normalizálókhoz. A v1.4.2 a v1.4.1-ben jelentkező PowerShell szintaxisvalidációs hibát javítja: a PSCustomObject property értékekben szereplő parancskifejezések zárójelezve lettek.",
     "RecommendedAction": "Javasolt lépések:\n\n1) Futtasd rendszerszintű LOG módban, WhatIf nélkül.\n2) Célzott esetben add meg a TargetKB értéket, például KB5089573.\n3) Ellenőrizd az ai_summary.json CompatibleP1Version mezőjét.\n4) CBS/DISM hiba esetén nézd meg az analysis/servicing/cbs-log-inventory.json és servicing/servicing-risk-summary.json fájlokat.\n5) Minidump esetén nézd meg az analysis/windbg/normalized/minidump-summary.json és suspect-drivers.json fájlokat.\n6) Repair-source jelzésnél a repair-source-advisor.json alapján ne általános WU-reset legyen az első javaslat.\n7) Ezután add át a csomagot a P1 v1.4.0 normalizálóknak.",
     "DetailedSteps": "Javasolt lépések:\n1) Rendszerszintű LOG futtatása után először az ai_summary.json TopFindings / RiskIndicators mezőit nézd.\n2) Storage esetén a storage/detected-storage-topology.json legyen az elsődleges tényforrás.\n3) A storage/storage-hint-validation.json mutatja, hogy a felhasználói hint összhangban van-e a detektált Windows storage képpel.\n4) RAID volume értelmezéshez a storage/raid-volume-map.json fájlt nézd.\n5) Fizikai HDD jelöltekhez a storage/physical-disk-candidate-map.json fájlt nézd.\n6) Célzott KB esetén az analysis/target-kb-correlation.json mutatja, van-e direkt KB szövegegyezés a Disk 153 időablakokban.\n7) Javítás előtt egyeztesd az Intel RST/VMD/RAID kezelőfelületben látott topológiát a Windows által detektált RAID volume képpel.\n8) Ezután következhet a P1 normalizáló csomag: WER, SetupAPI, CBS, driver/PnP és event-correlation normalizálás.",
     "ToolTip": "P0 evidence bridge P1 v1.4.0 normalizálókhoz: CbsPersist, CDB minidump, KB-context, repair-source advisor.",
