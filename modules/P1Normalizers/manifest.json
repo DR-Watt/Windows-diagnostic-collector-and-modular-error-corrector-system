@@ -1,0 +1,18 @@
+{
+  "Id": "P1Normalizers",
+  "Name": "P1 normalizálók",
+  "Version": "1.4.0",
+  "Author": "DiagTeam",
+  "Script": "P1Normalizers.ps1",
+  "Risk": "Low",
+  "Category": "EvidenceNormalization",
+  "Description": "P1 normalizálók: WER, SetupAPI, CBS HRESULT, Driver/PnP, Event correlation és Windows Update error normalizálás meglévő SystemEvidence csomagból.",
+  "Ui": {
+    "Summary": "A P1 normalizálók a már elkészült SystemEvidence csomagból készítenek deduplikált, AI-barát elemzési réteget.\n\nNormalizálók:\n\n1) WERNormalizer\n2) SetupAPINormalizer\n3) CBSHResultNormalizer\n4) DriverPnPProblemNormalizer\n5) EventCorrelationNormalizer\n6) WindowsUpdateErrorNormalizer\n\nA modul nem javít rendszert; csak analysis/*.json fájlokat hoz létre.",
+    "RecommendedAction": "Javasolt lépések:\n\n1) Előbb fusson le a SystemEvidenceCollector.\n2) Ezután indítsd el a P1 normalizálókat.\n3) Elsőként az analysis/p1-normalization-summary.json fájlt olvasd.\n4) Utána az analysis/p1-findings.json alapján válassz P2 collector vagy javítómodul irányt.\n5) Windows Update javítást csak a P1 findingok értékelése után indíts.",
+    "DetailedSteps": "1) A modul megkeresi a legutóbbi logs/evidence_packages/<csomag> könyvtárat.\n2) Létrehozza az analysis mappát, ha még nincs.\n3) Lefuttatja a hat normalizálót.\n4) Kiírja a normalized-*.json fájlokat.\n5) Készít p1-findings.json és p1-normalization-summary.json fájlt.\n6) Biztonsági mentést készít az eredeti ai_summary.json-ról: analysis/ai_summary.before-p1-normalizers.json.\n7) Az ai_summary.json P1Normalization blokkal bővül.",
+    "ToolTip": "Meglévő SystemEvidence csomag normalizálása P1 elemzéshez. Read-only modul.",
+    "ExpectedOutput": "analysis/normalized-*.json; analysis/p1-findings.json; analysis/p1-normalization-summary.json",
+    "Impact": "Low: csak JSON elemzési fájlokat ír az evidence csomag analysis mappájába."
+  }
+}

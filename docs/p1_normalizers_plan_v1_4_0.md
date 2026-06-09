@@ -1,33 +1,34 @@
-# P1 Normalizálók — v1.4.0 tervezett csomag
+# P1 normalizers plan v1.4.0
 
-A v1.3.4 után a fókusz a P1 normalizálókon legyen, nem újabb nagy P0 adatgyűjtésen.
-
-## Tervezett normalizálók
+## Implementált normalizálók
 
 1. `WERNormalizer`
-   - WER Report.wer mezők normalizálása: EventType, AppName, FaultModule, BucketId, CabId, time.
+   - Input: `wer/wer-reports.json`, `copied_logs/ReportArchive/**/Report.wer`, `copied_logs/ReportQueue/**/Report.wer`.
+   - Output: `analysis/normalized-wer.json`.
 
 2. `SetupAPINormalizer`
-   - setupapi.dev.log / setupapi.setup.log hibaszakaszok, device install failures, INF mapping.
+   - Input: `copied_logs/setupapi.dev.log`, `copied_logs/setupapi.setup.log`.
+   - Output: `analysis/normalized-setupapi.json`.
 
 3. `CBSHResultNormalizer`
-   - CBS.log HRESULT, package identity, component store corruption minták.
+   - Input: `copied_logs/CBS.log`, `copied_logs/dism.log`, `servicing/*.txt`, `commands/dism-checkhealth.txt`.
+   - Output: `analysis/normalized-cbs-hresults.json`.
 
 4. `DriverPnPProblemNormalizer`
-   - Get-PnpDevice problem code, missing / not present / failed device mapping.
+   - Input: `storage/pnp-storage-devices.json`, `drivers/pnp-signed-drivers.json`, `events/Microsoft-Windows-Kernel-PnP_Configuration.jsonl`, `events/Microsoft-Windows-DeviceSetupManager_Admin.jsonl`.
+   - Output: `analysis/normalized-pnp-problems.json`.
 
 5. `EventCorrelationNormalizer`
-   - Disk 153, Kernel-Power, Setup, WindowsUpdateClient és reboot időablakok közös idősora.
+   - Input: `storage/disk153-update-setup-correlation.json`.
+   - Output: `analysis/normalized-event-correlation.json`.
 
 6. `WindowsUpdateErrorNormalizer`
-   - WindowsUpdate.generated.log hibakódok, target KB scan result és retry mintázatok.
+   - Input: `windows_update/WindowsUpdate.generated.log`, `copied_logs/ReportingEvents.log`, `events/Microsoft-Windows-WindowsUpdateClient_Operational.jsonl`.
+   - Output: `analysis/normalized-windowsupdate-errors.json`.
 
-## Elvárt outputok
+## Következő P2 irány
 
-- `analysis/normalized-wer.json`
-- `analysis/normalized-setupapi.json`
-- `analysis/normalized-cbs-hresults.json`
-- `analysis/normalized-pnp-problems.json`
-- `analysis/normalized-event-correlation.json`
-- `analysis/normalized-windowsupdate-errors.json`
-- `analysis/p1-findings.json`
+- WinDbg / dump summary opcionális modul.
+- Hyper-V/HNS dedikált normalizáló.
+- Network/TCP ephemeral port normalizáló.
+- Power/sleep-resume normalizáló.
