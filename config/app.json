@@ -1,7 +1,10 @@
 {
+  "SchemaVersion": "diagframework.appconfig.v1",
   "ProductName": "Windows 11 Update Repair",
   "AppName": "DiagFramework",
-  "Version": "1.4.0",
-  "BuildName": "P1 Normalizers Pack",
-  "WindowTitleFormat": "{ProductName} - {AppName} v{Version} {BuildName}"
+  "Version": "1.4.1",
+  "BuildName": "P0 Evidence Bridge for P1 Normalizers v1.4.0",
+  "ReleaseChannel": "MVP",
+  "WindowTitleFormat": "{ProductName} - {AppName} v{Version} {BuildName}",
+  "GeneratedAt": "2026-06-09T06:56:16.042803+00:00"
 }

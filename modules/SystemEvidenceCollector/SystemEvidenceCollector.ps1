@@ -2,11 +2,11 @@
 .SYNOPSIS
   Windows 11 rendszerbizonyíték és vendor diagnosztikai LOG gyűjtő modul.
 .DESCRIPTION
-  v1.3.4 Storage Topology Truth Pack.
-  Read-only evidence gyűjtés + storage topológia validáció: a felhasználói
-  storage_hints.json csak kontextus/hipotézis, a tényleges Windows mapping külön
-  DetectedTopology-ként jelenik meg. RAID volume, physical disk candidate,
-  hint-mismatch és célzott KB korrelációs összefoglaló.
+  v1.4.1 P0 Evidence Bridge Pack for P1 Normalizers v1.4.0.
+  Read-only evidence gyűjtés + Baunok hiányosság-pótlás: CbsPersist teljesebb
+  gyűjtés, minidump CDB/WinDbg batch evidence, repair source advisor, KB-context
+  handoff és P1 v1.4.0 normalizáló-kompatibilis átadási JSON-ok. Továbbra sem
+  javít rendszert.
 #>
 [CmdletBinding()]
 param(
@@ -20,15 +20,17 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ModuleId = 'SystemEvidenceCollector'
-$ModuleVersion = '1.3.4'
+$ModuleVersion = '1.4.1'
+$P1NormalizerCompatibleVersion = '1.4.0'
 
 function Get-Metadata {
     [PSCustomObject]@{
         Id = $ModuleId
         Name = 'Rendszer LOG bizonyítékgyűjtő'
         Version = $ModuleVersion
+        P1CompatibleVersion = $P1NormalizerCompatibleVersion
         Risk = 'Low'
-        Summary = 'Windows 11 P0 read-only evidence + storage topology truth: user hint vs detected RAID/physical topology, Disk 153 correlation, controller/driver context és target KB correlation.'
+        Summary = 'Windows 11 P0 read-only evidence bridge P1 v1.4.0 normalizálókhoz: CbsPersist, CDB minidump evidence, repair-source advisor, KB-context handoff, servicing/WU signal summaries.'
     }
 }
 
@@ -1132,10 +1134,7 @@ function New-StorageRiskSummary {
         HintValidation = $HintValidation
         ByDiskNumber = $byDisk
         ByPdoObjectName = $byPdo
-        TimeRange = [PSCustomObject]@{
-            Oldest = @($Timeline | Where-Object { $_.TimeCreated } | Sort-Object TimeCreated | Select-Object -First 1).TimeCreated
-            Newest = @($Timeline | Where-Object { $_.TimeCreated } | Sort-Object TimeCreated | Select-Object -Last 1).TimeCreated
-        }
+        TimeRange = (Get-TimeRangeFromObjectsSafe -Items $Timeline -PropertyName 'TimeCreated')
         Interpretation = @(
             'Event ID 153 is an I/O retry signal. It does not prove physical disk failure by itself.',
             'v1.3.4 separates UserProvidedTopology from DetectedTopology. Automated findings must prefer detected-storage-topology.json over storage_hints.json when they conflict.',
@@ -1148,6 +1147,7 @@ function New-StorageRiskSummary {
 function New-TopFindingsForStorage {
     param($RiskSummary, $Correlation = @(), $HintValidation = $null, $DetectedTopology = $null)
     $findings = @()
+    if ($null -eq $RiskSummary) { return @() }
     if ($RiskSummary.Disk153Count -gt 0) {
         $findings += [PSCustomObject]@{
             Severity='High'
@@ -1173,6 +1173,7 @@ function New-TopFindingsForStorage {
 function New-RiskIndicatorsForStorage {
     param($RiskSummary, $HintValidation = $null, $DetectedTopology = $null)
     $items = @()
+    if ($null -eq $RiskSummary) { return @() }
     if ($RiskSummary.Disk153Count -gt 0) { $items += [PSCustomObject]@{ Code='StorageIoRetry153'; Strength=$RiskSummary.RiskLevel; Count=$RiskSummary.Disk153Count; Description='Disk provider Event ID 153 indicates I/O retry. Investigate storage path before aggressive Windows Update repair.' } }
     if ($RiskSummary.Disk153EventsOnHintedDiskNumbers -gt 0) { $items += [PSCustomObject]@{ Code='HintedDiskNumbersHave153'; Strength='ContextMatched'; Count=$RiskSummary.Disk153EventsOnHintedDiskNumbers; Description='Disk 153 events occurred on disk numbers present in storage_hints.json, but hint validity must be checked against detected topology.' } }
     try { if ($HintValidation -and @($HintValidation.Mismatches).Count -gt 0) { $items += [PSCustomObject]@{ Code='StorageHintMismatch'; Strength='DetectedMismatch'; Count=@($HintValidation.Mismatches).Count; Description='User-provided storage hint conflicts with detected RAID/size topology. Use detected topology for automated conclusions.' } } } catch { }
@@ -1182,6 +1183,9 @@ function New-RiskIndicatorsForStorage {
 
 function New-SuggestedNextEvidenceForStorage {
     param($RiskSummary, $HintValidation = $null, $TargetKbCorrelation = $null)
+    if ($null -eq $RiskSummary -or [int]$RiskSummary.Disk153Count -eq 0) {
+        return @([PSCustomObject]@{ Priority='Info'; Evidence='No Disk Event ID 153 events detected in the selected time window'; Reason='Storage path is not a primary P0 signal for this package; review servicing, Windows Update, WER and driver evidence.' })
+    }
     $items = @(
         [PSCustomObject]@{ Priority='P0'; Evidence='Open Intel RST / motherboard RAID management UI and export volume/member status if available'; Reason='Detected Windows topology may expose RAID volumes instead of raw JBOD disks.' },
         [PSCustomObject]@{ Priority='P0'; Evidence='Collect SMART / manufacturer HDD health data for the underlying physical disks, especially ST16000NT001 candidates'; Reason='Differentiate controller/path retry from drive-level media or command timeout issues.' },
@@ -1308,6 +1312,11 @@ function Collect-StorageEvidence {
         TopFindings=$topFindings
         RiskIndicators=$riskIndicators
         SuggestedNextEvidence=$suggestedNextEvidence
+        EvidenceGapSummary=$evidenceGapSummary
+        EvidenceGapCount=try { [int]$evidenceGapSummary.GapCount } catch { 0 }
+        ServicingRiskSummary=$servicingRiskSummary
+        WindowsUpdateSignalSummary=$windowsUpdateSignalSummary
+        P1NormalizerHandoff=@('WERNormalizer','SetupAPINormalizer','CBSHResultNormalizer','DriverPnPProblemNormalizer','EventCorrelationNormalizer','WindowsUpdateErrorNormalizer')
     }
 }
 
@@ -1499,6 +1508,583 @@ function Get-ObjectPropertyValueSafe {
 }
 
 
+
+function Get-TimeRangeFromObjectsSafe {
+    param(
+        [AllowNull()]$Items = @(),
+        [string]$PropertyName = 'TimeCreated'
+    )
+    $times = @()
+    foreach ($item in @($Items)) {
+        try {
+            $value = Get-ObjectPropertyValueSafe -Object $item -Name $PropertyName -Default $null
+            if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+                $times += [datetime]$value
+            }
+        }
+        catch { }
+    }
+    if ($times.Count -eq 0) {
+        return [PSCustomObject]@{ Oldest=$null; Newest=$null; Count=0 }
+    }
+    $sorted = @($times | Sort-Object)
+    return [PSCustomObject]@{
+        Oldest = ($sorted | Select-Object -First 1).ToString('o')
+        Newest = ($sorted | Select-Object -Last 1).ToString('o')
+        Count = $sorted.Count
+    }
+}
+
+function Read-JsonFileSafe {
+    param([string]$Path, [AllowNull()]$Default = $null)
+    try {
+        if (Test-Path -LiteralPath $Path) {
+            return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop)
+        }
+    }
+    catch { }
+    return $Default
+}
+
+function Get-RegexMatchesFromTextSafe {
+    param(
+        [AllowNull()][string]$Text,
+        [Parameter(Mandatory)][string]$Pattern,
+        [int]$Limit = 200
+    )
+    $items = @()
+    if ([string]::IsNullOrWhiteSpace($Text)) { return @() }
+    try {
+        $matches = [regex]::Matches($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        foreach ($m in $matches) {
+            if ($items.Count -ge $Limit) { break }
+            $items += [string]$m.Value
+        }
+    }
+    catch { }
+    return @($items)
+}
+
+function New-ServicingRiskSummary {
+    param([string]$PackageRoot)
+    $servicingRoot = Join-Path $PackageRoot 'servicing'
+    $copiedRoot = Join-Path $PackageRoot 'copied_logs'
+    $hresultSummaryPath = Join-Path $servicingRoot 'cbs-hresult-summary.json'
+    $hresults = @(Read-JsonFileSafe -Path $hresultSummaryPath -Default @())
+    $dismScanPath = Join-Path $servicingRoot 'dism-scanhealth.txt'
+    $sfcVerifyPath = Join-Path $servicingRoot 'sfc-verifyonly.txt'
+    $dismCheckHealthPath = Join-Path $copiedRoot 'dism.log'
+    $dismScanText = ''
+    $sfcText = ''
+    try { if (Test-Path -LiteralPath $dismScanPath) { $dismScanText = Get-Content -LiteralPath $dismScanPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue } } catch { }
+    try { if (Test-Path -LiteralPath $sfcVerifyPath) { $sfcText = Get-Content -LiteralPath $sfcVerifyPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue } } catch { }
+
+    $topHResults = @($hresults | Sort-Object Count -Descending | Select-Object -First 20)
+    $highSignal = $false
+    $reasons = @()
+    foreach ($hr in @($topHResults)) {
+        try {
+            if ([int]$hr.Count -ge 10 -and [string]$hr.HResult -ne '0x00000000') {
+                $highSignal = $true
+                $reasons += ('Frequent CBS HRESULT {0} Count={1}' -f $hr.HResult, $hr.Count)
+            }
+        } catch { }
+    }
+    if ($dismScanText -match 'repairable|sérült|corruption|component store') { $highSignal = $true; $reasons += 'DISM ScanHealth text contains repair/corruption-related wording.' }
+    [PSCustomObject]@{
+        SchemaVersion='diagframework.servicing.risk.summary.v1'
+        Status=if ($highSignal) { 'SignalDetected' } else { 'NoStrongSignal' }
+        TopHResults=$topHResults
+        DismScanHealthFile='servicing/dism-scanhealth.txt'
+        SfcVerifyOnlyFile='servicing/sfc-verifyonly.txt'
+        HasFrequentNonZeroHRESULT=$highSignal
+        Reasons=$reasons
+        SuggestedNormalizer='CBSHResultNormalizer'
+        Meaning='P0 servicing summary only. Detailed classification belongs to the P1 CBSHResultNormalizer.'
+    }
+}
+
+function New-WindowsUpdateSignalSummary {
+    param([string]$PackageRoot, [string]$TargetKB = '')
+    $wuRoot = Join-Path $PackageRoot 'windows_update'
+    $logPath = Join-Path $wuRoot 'WindowsUpdate.generated.log'
+    $text = ''
+    try { if (Test-Path -LiteralPath $logPath) { $text = Get-Content -LiteralPath $logPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue } } catch { }
+    $hresults = @(Get-RegexMatchesFromTextSafe -Text $text -Pattern '0x[0-9a-fA-F]{8}' -Limit 5000 | Group-Object | Sort-Object Count -Descending | Select-Object -First 30 | ForEach-Object { [PSCustomObject]@{ Code=$_.Name; Count=$_.Count } })
+    $kbMatches = @(Get-RegexMatchesFromTextSafe -Text $text -Pattern 'KB\d{6,8}' -Limit 5000 | Group-Object | Sort-Object Count -Descending | Select-Object -First 30 | ForEach-Object { [PSCustomObject]@{ KB=$_.Name; Count=$_.Count } })
+    $targetMatches = @()
+    if (-not [string]::IsNullOrWhiteSpace($TargetKB)) { $targetMatches = @($kbMatches | Where-Object { [string]$_.KB -ieq [string]$TargetKB }) }
+    [PSCustomObject]@{
+        SchemaVersion='diagframework.windowsupdate.signal.summary.v1'
+        LogPath='windows_update/WindowsUpdate.generated.log'
+        LogPresent=(Test-Path -LiteralPath $logPath)
+        TargetKB=$TargetKB
+        TargetKBDirectMatchCount=if ($targetMatches.Count -gt 0) { [int]$targetMatches[0].Count } else { 0 }
+        TopErrorCodes=$hresults
+        TopKBs=$kbMatches
+        SuggestedNormalizer='WindowsUpdateErrorNormalizer'
+        Meaning='P0 lightweight extraction. Detailed error classification belongs to the P1 WindowsUpdateErrorNormalizer.'
+    }
+}
+
+function New-P0EvidenceGapSummary {
+    param(
+        [string]$PackageRoot,
+        [string]$TargetKB = '',
+        $Issues = @(),
+        $EventSummary = @(),
+        $P0Results = @(),
+        $ServicingRisk = $null,
+        $WindowsUpdateSignal = $null,
+        $WerSummary = $null
+    )
+    $gaps = @()
+    $notes = @()
+    foreach ($issue in @($Issues)) {
+        if ([string]$issue.Code -eq 'StorageEvidenceFailed') {
+            $gaps += [PSCustomObject]@{ Priority='P0'; Code='StorageEvidenceFailed'; Area='Storage'; Action='Fix storage evidence collection so absence of Disk 153 is represented as NoSignal, not as module failure.'; Reason=$issue.Message }
+        }
+    }
+    $truncated = @(@($EventSummary) | Where-Object { [bool](Get-ObjectPropertyValueSafe -Object $_ -Name 'Truncated' -Default $false) })
+    if ($truncated.Count -gt 0) {
+        $gaps += [PSCustomObject]@{ Priority='P1'; Code='JsonlTruncatedRawEvtxAvailable'; Area='Events'; Action='P1 normalizers should prefer raw EVTX or increase MaxEvents for high-volume logs.'; Reason=('Truncated logs: ' + (@($truncated | ForEach-Object { $_.LogName }) -join ', ')) }
+    }
+    if ([string]::IsNullOrWhiteSpace($TargetKB)) {
+        $notes += [PSCustomObject]@{ Code='TargetKBNotSupplied'; Area='WindowsUpdate'; Meaning='System-level evidence package was created without TargetKB. This is valid, but direct KB correlation cannot be decided.' }
+    }
+    try {
+        if ($ServicingRisk -and $ServicingRisk.Status -eq 'SignalDetected') {
+            $gaps += [PSCustomObject]@{ Priority='P0'; Code='ServicingSignalDetected'; Area='Servicing'; Action='Feed servicing/cbs-hresult-summary.json and DISM/SFC outputs into CBSHResultNormalizer.'; Reason=(@($ServicingRisk.Reasons) -join '; ') }
+        }
+    } catch { }
+    try {
+        $werCount = [int](Get-ObjectPropertyValueSafe -Object $WerSummary -Name 'ReportCount' -Default 0)
+        if ($werCount -ge 300) {
+            $gaps += [PSCustomObject]@{ Priority='P1'; Code='HighWERVolume'; Area='WER'; Action='Use WERNormalizer to reduce WER noise and separate vendor/app crashes from update-relevant failures.'; Reason=('WER ReportCount=' + $werCount) }
+        }
+    } catch { }
+    try {
+        if ($WindowsUpdateSignal -and @($WindowsUpdateSignal.TopErrorCodes).Count -gt 0) {
+            $gaps += [PSCustomObject]@{ Priority='P1'; Code='WindowsUpdateErrorsPresent'; Area='WindowsUpdate'; Action='Use WindowsUpdateErrorNormalizer to classify TopErrorCodes and correlate with CBS/Setup events.'; Reason=('Top error code=' + [string]$WindowsUpdateSignal.TopErrorCodes[0].Code + ' Count=' + [string]$WindowsUpdateSignal.TopErrorCodes[0].Count) }
+        }
+    } catch { }
+    try {
+        $cbsBridge = (@($P0Results) | Where-Object { $_.Area -eq 'CbsPersistEvidence' } | Select-Object -First 1).Result
+        if ($cbsBridge -and [int](Get-ObjectPropertyValueSafe -Object $cbsBridge -Name 'CbsPersistCabCount' -Default 0) -eq 0) {
+            $notes += [PSCustomObject]@{ Code='NoCbsPersistCabFound'; Area='Servicing'; Meaning='No CbsPersist CAB files were collected. This can be normal, but CBSHResultNormalizer should use available CBS/DISM logs.' }
+        }
+    } catch { }
+    try {
+        $mini = (@($P0Results) | Where-Object { $_.Area -eq 'MiniDumpWinDbg' } | Select-Object -First 1).Result
+        if ($mini -and [string]$mini.Status -eq 'CdbNotFound' -and [int]$mini.DumpCount -gt 0) {
+            $gaps += [PSCustomObject]@{ Priority='P0'; Code='MiniDumpPresentButCdbMissing'; Area='CrashDump'; Action='Install Microsoft Debugging Tools for Windows or run MiniDumpWinDbgAnalyzer on a machine with cdb.exe.'; Reason=('DumpCount=' + [string]$mini.DumpCount) }
+        }
+        elseif ($mini -and [int]$mini.DumpCount -gt 0) {
+            $gaps += [PSCustomObject]@{ Priority='P1'; Code='MiniDumpAnalysisAvailable'; Area='CrashDump'; Action='Feed analysis/windbg/normalized/*.json into WERNormalizer, DriverPnPProblemNormalizer and EventCorrelationNormalizer.'; Reason=('DumpCount=' + [string]$mini.DumpCount + ' Status=' + [string]$mini.Status) }
+        }
+    } catch { }
+    try {
+        $advisor = (@($P0Results) | Where-Object { $_.Area -eq 'RepairSourceAdvisor' } | Select-Object -First 1).Result
+        if ($advisor -and [string]$advisor.Status -eq 'RepairSourceIssueCandidate') {
+            $gaps += [PSCustomObject]@{ Priority='P0'; Code='RepairSourceIssueCandidate'; Area='Servicing'; Action='Do not prioritize generic WU reset. Collect/prepare matching repair source and let P1 CBSHResultNormalizer validate 0x800F0915/repair-content evidence.'; Reason='RepairSourceAdvisor detected repair-source-missing signals.' }
+        }
+    } catch { }
+    [PSCustomObject]@{
+        SchemaVersion='diagframework.p0.evidence.gap.summary.v1.4.1'
+        CompatibleP1Version=$P1NormalizerCompatibleVersion
+        Source='P0EvidenceCollectorRuntime'
+        GapCount=@($gaps).Count
+        NoteCount=@($notes).Count
+        Gaps=$gaps
+        Notes=$notes
+        P1Handoff=@(
+            'WERNormalizer',
+            'SetupAPINormalizer',
+            'CBSHResultNormalizer',
+            'DriverPnPProblemNormalizer',
+            'EventCorrelationNormalizer',
+            'WindowsUpdateErrorNormalizer'
+        )
+    }
+}
+
+
+function Get-P1NormalizerHandoffDefinition {
+    [PSCustomObject]@{
+        SchemaVersion='diagframework.p1.normalizer.handoff.definition.v1'
+        CompatibleP1Version=$P1NormalizerCompatibleVersion
+        SourceCollectorVersion=$ModuleVersion
+        Normalizers=@(
+            [PSCustomObject]@{ Id='WERNormalizer'; Version='1.4.0'; Input=@('wer/wer-summary.json','wer/wer-reports.json','analysis/windbg/normalized/minidump-summary.json'); Purpose='WER és crash jellegű zaj normalizálása.' },
+            [PSCustomObject]@{ Id='SetupAPINormalizer'; Version='1.4.0'; Input=@('copied_logs/setupapi.dev.log','copied_logs/setupapi.setup.log'); Purpose='Driver telepítési események és hibák egységesítése.' },
+            [PSCustomObject]@{ Id='CBSHResultNormalizer'; Version='1.4.0'; Input=@('servicing/cbs-hresult-summary.json','analysis/servicing/cbs-log-inventory.json','copied_logs/CBS'); Purpose='CBS/DISM HRESULT kódok és servicing állapotok normalizálása.' },
+            [PSCustomObject]@{ Id='DriverPnPProblemNormalizer'; Version='1.4.0'; Input=@('drivers/pnp-signed-drivers.json','storage/pnp-storage-devices.json','analysis/windbg/normalized/suspect-drivers.json'); Purpose='PnP problémák és driverjelöltek összekötése.' },
+            [PSCustomObject]@{ Id='EventCorrelationNormalizer'; Version='1.4.0'; Input=@('events/event-summary.json','events/raw','analysis/kb-context-handoff.json','analysis/windbg/normalized/crash-timeline.json'); Purpose='KB, CBS, DISM, WER, reboot és crash idővonal korreláció.' },
+            [PSCustomObject]@{ Id='WindowsUpdateErrorNormalizer'; Version='1.4.0'; Input=@('windows_update/windowsupdate-signal-summary.json','windows_update/WindowsUpdate.generated.log','copied_logs/ReportingEvents.log'); Purpose='Windows Update hibakódok és KB-kontextus normalizálása.' }
+        )
+    }
+}
+
+function Find-CdbExecutable {
+    $candidates = @()
+    try { if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Debuggers\x64\cdb.exe') } } catch { }
+    try { if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles 'Windows Kits\10\Debuggers\x64\cdb.exe') } } catch { }
+    try { if (${env:ProgramFiles(x86)}) { $candidates += (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\Debuggers\arm64\cdb.exe') } } catch { }
+    try {
+        $cmd = Get-Command cdb.exe -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) { $candidates += $cmd.Source }
+    } catch { }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate)) { return [string]$candidate }
+    }
+    return $null
+}
+
+function Get-RegexValueSafe {
+    param([AllowNull()][string]$Text, [string]$Pattern, [int]$Group = 1)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+    try {
+        $m = [regex]::Match($Text, $Pattern)
+        if ($m.Success -and $m.Groups.Count -gt $Group) { return $m.Groups[$Group].Value.Trim() }
+    } catch { }
+    return $null
+}
+
+function Collect-CbsPersistEvidence {
+    param([string]$PackageRoot)
+    $analysisRoot = Join-Path $PackageRoot 'analysis/servicing'
+    $cbsDest = Join-Path $PackageRoot 'copied_logs/CBS'
+    $dismDest = Join-Path $PackageRoot 'copied_logs/DISM'
+    $extractDest = Join-Path $cbsDest 'extracted'
+    New-DirectorySafe $analysisRoot; New-DirectorySafe $cbsDest; New-DirectorySafe $dismDest; New-DirectorySafe $extractDest
+
+    $inventory = @()
+    $seen = @{}
+    $patterns = @(
+        [PSCustomObject]@{ Area='CBS'; Root=$cbsDest; Pattern=(Join-Path $env:SystemRoot 'Logs\CBS\CBS.log'); ExtractCab=$false },
+        [PSCustomObject]@{ Area='CBS'; Root=$cbsDest; Pattern=(Join-Path $env:SystemRoot 'Logs\CBS\CbsPersist*.log'); ExtractCab=$false },
+        [PSCustomObject]@{ Area='CBS'; Root=$cbsDest; Pattern=(Join-Path $env:SystemRoot 'Logs\CBS\CbsPersist*.cab'); ExtractCab=$true },
+        [PSCustomObject]@{ Area='DISM'; Root=$dismDest; Pattern=(Join-Path $env:SystemRoot 'Logs\DISM\dism.log'); ExtractCab=$false },
+        [PSCustomObject]@{ Area='DISM'; Root=$dismDest; Pattern=(Join-Path $env:SystemRoot 'Logs\DISM\dism*.log'); ExtractCab=$false }
+    )
+
+    $expandPath = $null
+    try { $expandPath = (Get-Command expand.exe -ErrorAction SilentlyContinue).Source } catch { $expandPath = $null }
+
+    foreach ($spec in $patterns) {
+        $files = @()
+        try { $files = @(Get-ChildItem -Path $spec.Pattern -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending) } catch { $files = @() }
+        foreach ($file in $files) {
+            if ($seen.ContainsKey($file.FullName)) { continue }
+            $seen[$file.FullName] = $true
+            $dest = Join-Path $spec.Root $file.Name
+            $record = [ordered]@{
+                SchemaVersion='diagframework.cbs.persist.inventory.item.v1'
+                Area=$spec.Area
+                SourcePath=$file.FullName
+                RelativePath=(Get-RelativePathSafe $PackageRoot $dest)
+                SizeBytes=$file.Length
+                LastWriteTime=$file.LastWriteTime.ToString('o')
+                IsCab=(([string]$file.Extension).ToLowerInvariant() -eq '.cab')
+                Copied=$false
+                Extracted=$false
+                ExtractedFileCount=0
+                ExtractedRoot=$null
+                Errors=@()
+            }
+            try {
+                Copy-Item -LiteralPath $file.FullName -Destination $dest -Force -ErrorAction Stop
+                $record.Copied = $true
+            } catch { $record.Errors += ('CopyError: ' + $_.Exception.Message) }
+
+            if ($record.Copied -and $record.IsCab -and [bool]$spec.ExtractCab) {
+                if ([string]::IsNullOrWhiteSpace($expandPath)) {
+                    $record.Errors += 'ExpandExeNotFound: CAB copied but not extracted.'
+                }
+                else {
+                    try {
+                        $safeName = [IO.Path]::GetFileNameWithoutExtension($file.Name)
+                        $outDir = Join-Path $extractDest $safeName
+                        New-DirectorySafe $outDir
+                        $expandOut = Join-Path $outDir 'expand.stdout.txt'
+                        $expandErr = Join-Path $outDir 'expand.stderr.txt'
+                        $p = Start-Process -FilePath $expandPath -ArgumentList @('-F:*', $dest, $outDir) -Wait -PassThru -NoNewWindow -RedirectStandardOutput $expandOut -RedirectStandardError $expandErr -ErrorAction Stop
+                        $record.Extracted = ($p.ExitCode -eq 0)
+                        $record.ExtractedRoot = Get-RelativePathSafe $PackageRoot $outDir
+                        $record.ExtractedFileCount = @(Get-ChildItem -LiteralPath $outDir -File -Recurse -ErrorAction SilentlyContinue).Count
+                        if ($p.ExitCode -ne 0) { $record.Errors += ('ExpandExitCode: ' + [string]$p.ExitCode) }
+                    } catch { $record.Errors += ('ExpandError: ' + $_.Exception.Message) }
+                }
+            }
+            $inventory += [PSCustomObject]$record
+        }
+    }
+
+    Write-JsonSafe -InputObject $inventory -Path (Join-Path $analysisRoot 'cbs-log-inventory.json') -Depth 12
+    $cbsCount = @($inventory | Where-Object { $_.Area -eq 'CBS' }).Count
+    $dismCount = @($inventory | Where-Object { $_.Area -eq 'DISM' }).Count
+    $cabCount = @($inventory | Where-Object { $_.IsCab }).Count
+    $extractedCount = @($inventory | Where-Object { $_.Extracted }).Count
+    $summary = [PSCustomObject]@{
+        SchemaVersion='diagframework.cbs.persist.collection.summary.v1'
+        Status=if($cbsCount -gt 0 -or $dismCount -gt 0){'Collected'}else{'NoLogsFound'}
+        CbsLogCount=$cbsCount
+        DismLogCount=$dismCount
+        CbsPersistCabCount=$cabCount
+        ExtractedCabCount=$extractedCount
+        Inventory='analysis/servicing/cbs-log-inventory.json'
+        P1Handoff='CBSHResultNormalizer'
+    }
+    Write-JsonSafe -InputObject $summary -Path (Join-Path $analysisRoot 'cbs-persist-collection-summary.json') -Depth 10
+    return $summary
+}
+
+function Invoke-MiniDumpCdbAnalysis {
+    param([string]$PackageRoot)
+    $dumpRoot = Join-Path $PackageRoot 'copied_logs/Minidump'
+    $windbgRoot = Join-Path $PackageRoot 'analysis/windbg'
+    $rawRoot = Join-Path $windbgRoot 'raw'
+    $xmlRoot = Join-Path $windbgRoot 'xml'
+    $normRoot = Join-Path $windbgRoot 'normalized'
+    New-DirectorySafe $rawRoot; New-DirectorySafe $xmlRoot; New-DirectorySafe $normRoot
+
+    $dumps = @()
+    try { if (Test-Path -LiteralPath $dumpRoot) { $dumps = @(Get-ChildItem -LiteralPath $dumpRoot -Filter '*.dmp' -File -Recurse -ErrorAction SilentlyContinue | Sort-Object LastWriteTime) } } catch { $dumps = @() }
+    $cdb = Find-CdbExecutable
+    $discovery = [PSCustomObject]@{
+        SchemaVersion='diagframework.windbg.cdb.discovery.v1'
+        CdbPath=$cdb
+        CdbFound=(-not [string]::IsNullOrWhiteSpace($cdb))
+        DumpCount=@($dumps).Count
+        RawOutputRoot='analysis/windbg/raw'
+        XmlOutputRoot='analysis/windbg/xml'
+        NormalizedRoot='analysis/windbg/normalized'
+        Note='CDB is part of Microsoft Debugging Tools for Windows. If absent, the collector records warnings and preserves raw dumps.'
+    }
+    Write-JsonSafe -InputObject $discovery -Path (Join-Path $windbgRoot 'cdb-discovery.json') -Depth 8
+
+    $results = @()
+    if (@($dumps).Count -eq 0) {
+        $summary = [PSCustomObject]@{ SchemaVersion='diagframework.windbg.minidump.summary.v1'; Status='NoDumpsFound'; DumpCount=0; CdbFound=$discovery.CdbFound; Results=@(); SuspectDrivers=@(); P1Handoff=@('WERNormalizer','DriverPnPProblemNormalizer','EventCorrelationNormalizer') }
+        Write-JsonSafe -InputObject @() -Path (Join-Path $normRoot 'minidump-summary.json') -Depth 12
+        Write-JsonSafe -InputObject @() -Path (Join-Path $normRoot 'suspect-drivers.json') -Depth 12
+        Write-JsonSafe -InputObject @() -Path (Join-Path $normRoot 'crash-timeline.json') -Depth 12
+        Write-JsonSafe -InputObject @() -Path (Join-Path $normRoot 'crash-update-correlation.json') -Depth 12
+        Write-JsonSafe -InputObject @() -Path (Join-Path $normRoot 'crash-blackbox-summary.json') -Depth 12
+        Write-JsonSafe -InputObject $summary -Path (Join-Path $normRoot 'windbg-analysis-summary.json') -Depth 12
+        return $summary
+    }
+
+    if ([string]::IsNullOrWhiteSpace($cdb)) {
+        foreach ($dump in $dumps) {
+            $results += [PSCustomObject]@{
+                dumpFile=Get-RelativePathSafe $PackageRoot $dump.FullName
+                dumpTimestampLocal=$dump.LastWriteTime.ToString('o')
+                analysisStatus='CdbNotFound'
+                bugCheckCode=$null; bugCheckName=$null; bugCheckParameters=@(); probablyCausedBy=$null; moduleName=$null; imageName=$null; failureBucketId=$null; processName=$null
+                stackTextExtracted=$false; loadedModulesExtracted=$false
+                hasBlackboxBSD=$false; hasBlackboxPNP=$false; hasBlackboxNTFS=$false; hasBlackboxWinlogon=$false
+                rawLogPath=$null; xmlPath=$null; confidence='NotAnalyzed'; notes=@('cdb.exe was not found. Install Microsoft Debugging Tools for Windows for automated dump analysis.')
+            }
+        }
+    }
+    else {
+        $symbolCache = Join-Path $windbgRoot 'symbols'
+        New-DirectorySafe $symbolCache
+        $symbolPath = 'srv*' + $symbolCache + '*https://msdl.microsoft.com/download/symbols'
+        foreach ($dump in $dumps) {
+            $safeName = [IO.Path]::GetFileNameWithoutExtension($dump.Name)
+            $rawLog = Join-Path $rawRoot ($safeName + '.windbg.txt')
+            $xmlPath = Join-Path $xmlRoot ($safeName + '.analyze.xml')
+            $analysisStatus = 'Success'
+            $errorText = $null
+            try {
+                $xmlCommand = '!analyze -v -xml -xmf "' + $xmlPath + '"'
+                $commands = @(
+                    '.symfix',
+                    ('.sympath+ ' + $symbolPath),
+                    '.reload',
+                    'vertarget',
+                    '!analyze -show',
+                    '!analyze -v',
+                    $xmlCommand,
+                    '.bugcheck',
+                    'kv',
+                    'lm N T',
+                    '!blackboxbsd',
+                    '!blackboxpnp',
+                    '!blackboxntfs',
+                    '!blackboxwinlogon',
+                    'q'
+                ) -join '; '
+                & $cdb -z $dump.FullName -c $commands -logo $rawLog | Out-Null
+            }
+            catch {
+                $analysisStatus = 'AnalysisFailed'
+                $errorText = $_.Exception.Message
+            }
+            $text = ''
+            try { if (Test-Path -LiteralPath $rawLog) { $text = Get-Content -LiteralPath $rawLog -Raw -ErrorAction SilentlyContinue } } catch { $text = '' }
+            $results += [PSCustomObject]@{
+                dumpFile=Get-RelativePathSafe $PackageRoot $dump.FullName
+                dumpTimestampLocal=$dump.LastWriteTime.ToString('o')
+                analysisStatus=$analysisStatus
+                bugCheckCode=Get-RegexValueSafe -Text $text -Pattern '(?im)^BugCheck\s+([^,\r\n]+)'
+                bugCheckName=Get-RegexValueSafe -Text $text -Pattern '(?im)^([A-Z_]+)\s+\([0-9a-fA-Fx]+'
+                bugCheckParameters=@()
+                probablyCausedBy=Get-RegexValueSafe -Text $text -Pattern '(?im)^Probably caused by\s*:\s*(.+)$'
+                moduleName=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*MODULE_NAME:\s*(.+)$'
+                imageName=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*IMAGE_NAME:\s*(.+)$'
+                failureBucketId=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*FAILURE_BUCKET_ID:\s*(.+)$'
+                processName=Get-RegexValueSafe -Text $text -Pattern '(?im)^\s*PROCESS_NAME:\s*(.+)$'
+                stackTextExtracted=($text -match '(?im)^STACK_TEXT:')
+                loadedModulesExtracted=($text -match '(?im)^start\s+end\s+module name|^Loaded Module List')
+                hasBlackboxBSD=($text -match '(?i)BLACKBOXBSD|BlackBoxBSD')
+                hasBlackboxPNP=($text -match '(?i)BLACKBOXPNP|BlackBoxPNP')
+                hasBlackboxNTFS=($text -match '(?i)BLACKBOXNTFS|BlackBoxNTFS')
+                hasBlackboxWinlogon=($text -match '(?i)BLACKBOXWINLOGON|BlackBoxWinlogon')
+                rawLogPath=if(Test-Path -LiteralPath $rawLog){Get-RelativePathSafe $PackageRoot $rawLog}else{$null}
+                xmlPath=if(Test-Path -LiteralPath $xmlPath){Get-RelativePathSafe $PackageRoot $xmlPath}else{$null}
+                confidence='NeedsManualReview'
+                notes=@($errorText) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            }
+        }
+    }
+
+    $suspects = @(
+        @($results) |
+        ForEach-Object {
+            $name = if(-not [string]::IsNullOrWhiteSpace($_.imageName)){ $_.imageName } elseif(-not [string]::IsNullOrWhiteSpace($_.moduleName)){ $_.moduleName } elseif(-not [string]::IsNullOrWhiteSpace($_.probablyCausedBy)){ $_.probablyCausedBy } else { $null }
+            if($name){ [PSCustomObject]@{ DriverName=$name; DumpFile=$_.dumpFile; Time=$_.dumpTimestampLocal; RawLogPath=$_.rawLogPath } }
+        } |
+        Group-Object DriverName |
+        Sort-Object Count -Descending |
+        ForEach-Object { [PSCustomObject]@{ driverName=$_.Name; occurrences=$_.Count; evidenceSources=@($_.Group | ForEach-Object { $_.RawLogPath }); firstSeen=(@($_.Group.Time) | Sort-Object | Select-Object -First 1); lastSeen=(@($_.Group.Time) | Sort-Object | Select-Object -Last 1); role='Kernel driver candidate, not confirmed root cause'; confidence='CandidateOnly' } }
+    )
+    $timeline = @(@($results) | Sort-Object dumpTimestampLocal | ForEach-Object { [PSCustomObject]@{ Time=$_.dumpTimestampLocal; DumpFile=$_.dumpFile; BugCheckCode=$_.bugCheckCode; ProbablyCausedBy=$_.probablyCausedBy; ImageName=$_.imageName; RawLogPath=$_.rawLogPath; AnalysisStatus=$_.analysisStatus } })
+    $blackbox = @(@($results) | ForEach-Object { [PSCustomObject]@{ DumpFile=$_.dumpFile; HasBlackboxBSD=$_.hasBlackboxBSD; HasBlackboxPNP=$_.hasBlackboxPNP; HasBlackboxNTFS=$_.hasBlackboxNTFS; HasBlackboxWinlogon=$_.hasBlackboxWinlogon } })
+
+    Write-JsonSafe -InputObject @($results) -Path (Join-Path $normRoot 'minidump-summary.json') -Depth 12
+    Write-JsonSafe -InputObject @($suspects) -Path (Join-Path $normRoot 'suspect-drivers.json') -Depth 12
+    Write-JsonSafe -InputObject @($timeline) -Path (Join-Path $normRoot 'crash-timeline.json') -Depth 12
+    Write-JsonSafe -InputObject @() -Path (Join-Path $normRoot 'crash-update-correlation.json') -Depth 12
+    Write-JsonSafe -InputObject @($blackbox) -Path (Join-Path $normRoot 'crash-blackbox-summary.json') -Depth 12
+
+    $summary = [PSCustomObject]@{
+        SchemaVersion='diagframework.windbg.analysis.summary.v1'
+        Status=if(-not $discovery.CdbFound){'CdbNotFound'}elseif(@($results | Where-Object {$_.analysisStatus -eq 'Success'}).Count -gt 0){'Analyzed'}else{'AnalysisFailed'}
+        CdbFound=$discovery.CdbFound
+        CdbPath=$discovery.CdbPath
+        DumpCount=@($dumps).Count
+        AnalyzedCount=@($results | Where-Object {$_.analysisStatus -eq 'Success'}).Count
+        SuspectDriverCount=@($suspects).Count
+        SummaryPath='analysis/windbg/normalized/minidump-summary.json'
+        SuspectDriversPath='analysis/windbg/normalized/suspect-drivers.json'
+        P1Handoff=@('WERNormalizer','DriverPnPProblemNormalizer','EventCorrelationNormalizer')
+        ImportantNote='Probably caused by is treated as candidate-only evidence, not final root cause.'
+    }
+    Write-JsonSafe -InputObject $summary -Path (Join-Path $normRoot 'windbg-analysis-summary.json') -Depth 12
+    return $summary
+}
+
+function New-RepairSourceAdvisor {
+    param([string]$PackageRoot, $ServicingRisk=$null, $WindowsUpdateSignal=$null)
+    $paths = @(
+        (Join-Path $PackageRoot 'copied_logs/CBS.log'),
+        (Join-Path $PackageRoot 'copied_logs/CBS'),
+        (Join-Path $PackageRoot 'copied_logs/DISM'),
+        (Join-Path $PackageRoot 'copied_logs/dism.log'),
+        (Join-Path $PackageRoot 'wer/wer-reports.json'),
+        (Join-Path $PackageRoot 'windows_update/WindowsUpdate.generated.log')
+    )
+    $signals = @()
+    $patterns = @(
+        [PSCustomObject]@{ Code='0x800F0915'; Category='RepairSourceMissing'; Severity='High'; Pattern='0x800f0915' },
+        [PSCustomObject]@{ Code='SourceFilesCouldNotBeFound'; Category='RepairSourceMissing'; Severity='High'; Pattern='source files could not be found|not able to find repair content anywhere|repair content' },
+        [PSCustomObject]@{ Code='0x800F0845'; Category='ServicingInstallFailure'; Severity='High'; Pattern='0x800f0845' }
+    )
+    foreach ($root in $paths) {
+        $files = @()
+        try {
+            if (Test-Path -LiteralPath $root -PathType Leaf) { $files = @(Get-Item -LiteralPath $root -ErrorAction SilentlyContinue) }
+            elseif (Test-Path -LiteralPath $root -PathType Container) { $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '\.(log|txt|json|wer)$' }) }
+        } catch { $files = @() }
+        foreach ($file in $files) {
+            foreach ($p in $patterns) {
+                try {
+                    $count = @(Select-String -LiteralPath $file.FullName -Pattern $p.Pattern -AllMatches -ErrorAction SilentlyContinue).Count
+                    if ($count -gt 0) { $signals += [PSCustomObject]@{ Code=$p.Code; Category=$p.Category; Severity=$p.Severity; Count=$count; EvidenceFile=Get-RelativePathSafe $PackageRoot $file.FullName } }
+                } catch { }
+            }
+        }
+    }
+    $hasRepairMissing = @($signals | Where-Object { $_.Category -eq 'RepairSourceMissing' }).Count -gt 0
+    $advisor = [PSCustomObject]@{
+        SchemaVersion='diagframework.repair.source.advisor.v1'
+        Status=if($hasRepairMissing){'RepairSourceIssueCandidate'}elseif(@($signals).Count -gt 0){'ServicingSignalsDetected'}else{'NoRepairSourceSignal'}
+        Signals=$signals
+        SuggestedFirstAction=if($hasRepairMissing){'Prefer DISM repair-source investigation before generic Windows Update reset.'}else{'No repair-source-specific action from P0 evidence.'}
+        ReadOnly=$true
+        RepairModeRequiredForFix=$true
+        ExampleCommands=@(
+            'DISM /Online /Cleanup-Image /CheckHealth',
+            'DISM /Online /Cleanup-Image /ScanHealth',
+            'DISM /Online /Cleanup-Image /RestoreHealth',
+            'DISM /Online /Cleanup-Image /RestoreHealth /Source:C:\RepairSource\Windows /LimitAccess',
+            'sfc /scannow'
+        )
+        P1Handoff=@('CBSHResultNormalizer','WindowsUpdateErrorNormalizer','EventCorrelationNormalizer')
+    }
+    $out = Join-Path $PackageRoot 'analysis/repair-source-advisor.json'
+    Write-JsonSafe -InputObject $advisor -Path $out -Depth 12
+    return $advisor
+}
+
+function New-KBContextHandoff {
+    param([string]$PackageRoot, [string]$TargetKB='')
+    $target = [string]$TargetKB
+    $roots = @(
+        (Join-Path $PackageRoot 'windows_update/WindowsUpdate.generated.log'),
+        (Join-Path $PackageRoot 'copied_logs/ReportingEvents.log'),
+        (Join-Path $PackageRoot 'copied_logs/CBS'),
+        (Join-Path $PackageRoot 'copied_logs/CBS.log'),
+        (Join-Path $PackageRoot 'copied_logs/DISM'),
+        (Join-Path $PackageRoot 'servicing')
+    )
+    $files = @()
+    foreach($root in $roots){
+        try {
+            if(Test-Path -LiteralPath $root -PathType Leaf){ $files += Get-Item -LiteralPath $root }
+            elseif(Test-Path -LiteralPath $root -PathType Container){ $files += @(Get-ChildItem -LiteralPath $root -File -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Extension -match '\.(log|txt|json|wer)$' }) }
+        } catch { }
+    }
+    $kbCounts = @{}
+    $errorCounts = @{}
+    $targetMatches = @()
+    foreach($file in @($files | Select-Object -Unique)){
+        try {
+            $text = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue
+            foreach($m in [regex]::Matches($text, 'KB\d{7,8}', 'IgnoreCase')) { $k=$m.Value.ToUpperInvariant(); if(-not $kbCounts.ContainsKey($k)){$kbCounts[$k]=0}; $kbCounts[$k]++ }
+            foreach($m in [regex]::Matches($text, '0x[0-9a-fA-F]{8}', 'IgnoreCase')) { $k=$m.Value.ToLowerInvariant(); if(-not $errorCounts.ContainsKey($k)){$errorCounts[$k]=0}; $errorCounts[$k]++ }
+            if(-not [string]::IsNullOrWhiteSpace($target) -and $text -match [regex]::Escape($target)) { $targetMatches += [PSCustomObject]@{ File=Get-RelativePathSafe $PackageRoot $file.FullName; Count=([regex]::Matches($text, [regex]::Escape($target), 'IgnoreCase')).Count } }
+        } catch { }
+    }
+    $topKbs = @($kbCounts.Keys | ForEach-Object { [PSCustomObject]@{ KB=$_; Count=$kbCounts[$_] } } | Sort-Object Count -Descending | Select-Object -First 30)
+    $topErrors = @($errorCounts.Keys | ForEach-Object { [PSCustomObject]@{ Code=$_; Count=$errorCounts[$_] } } | Sort-Object Count -Descending | Select-Object -First 30)
+    $handoff = [PSCustomObject]@{
+        SchemaVersion='diagframework.kb.context.handoff.v1'
+        TargetKB=$target
+        TargetKBDirectMatchCount=@($targetMatches | Measure-Object Count -Sum).Sum
+        TargetKBMatchedFiles=$targetMatches
+        TopKBs=$topKbs
+        TopErrorCodes=$topErrors
+        Assessment=if([string]::IsNullOrWhiteSpace($target)){'NoTargetKBRequested'}elseif(@($targetMatches).Count -gt 0){'TargetKBSignalsPresent'}else{'NoDirectTargetKBMatch'}
+        P1Handoff=@('WindowsUpdateErrorNormalizer','CBSHResultNormalizer','EventCorrelationNormalizer')
+    }
+    Write-JsonSafe -InputObject $handoff -Path (Join-Path $PackageRoot 'analysis/kb-context-handoff.json') -Depth 12
+    return $handoff
+}
+
 function New-SummaryObject {
     param([string]$Status,[string]$PackageRoot,[string]$ZipPath,[string]$TargetKB,[int]$DaysBack,[int]$MaxEvents,$EventSummary=@(),$Copied=@(),$NativeResults=@(),$Issues=@(),$P0Results=@())
     $split = Split-IssuesBySeverity -Issues $Issues
@@ -1517,6 +2103,14 @@ function New-SummaryObject {
     )
     $warningsByCode = @(@($split.Warnings) | Group-Object Code | Sort-Object Count -Descending | ForEach-Object { [PSCustomObject]@{ Code=$_.Name; Count=$_.Count } })
     $topFindings = @(); $riskIndicators = @(); $suggestedNextEvidence = @()
+    $evidenceGapSummary = $null; $servicingRiskSummary = $null; $windowsUpdateSignalSummary = $null; $cbsPersistSummary=$null; $miniDumpSummary=$null; $repairSourceAdvisor=$null; $kbContextHandoff=$null
+    try { $evidenceGapSummary = (@($P0Results) | Where-Object { $_.Area -eq 'P0EvidenceGaps' } | Select-Object -First 1).Result } catch { }
+    try { $servicingRiskSummary = (@($P0Results) | Where-Object { $_.Area -eq 'ServicingRisk' } | Select-Object -First 1).Result } catch { }
+    try { $windowsUpdateSignalSummary = (@($P0Results) | Where-Object { $_.Area -eq 'WindowsUpdateSignal' } | Select-Object -First 1).Result } catch { }
+    try { $cbsPersistSummary = (@($P0Results) | Where-Object { $_.Area -eq 'CbsPersistEvidence' } | Select-Object -First 1).Result } catch { }
+    try { $miniDumpSummary = (@($P0Results) | Where-Object { $_.Area -eq 'MiniDumpWinDbg' } | Select-Object -First 1).Result } catch { }
+    try { $repairSourceAdvisor = (@($P0Results) | Where-Object { $_.Area -eq 'RepairSourceAdvisor' } | Select-Object -First 1).Result } catch { }
+    try { $kbContextHandoff = (@($P0Results) | Where-Object { $_.Area -eq 'KBContextHandoff' } | Select-Object -First 1).Result } catch { }
     try {
         $storageP0 = @(@($P0Results) | Where-Object { $_.Area -eq 'Storage' } | Select-Object -First 1)
         if ($storageP0 -and $storageP0.Result) {
@@ -1526,7 +2120,7 @@ function New-SummaryObject {
         }
     } catch { }
     [PSCustomObject]@{
-        SchemaVersion='diagframework.systemevidence.summary.v3.4'
+        SchemaVersion='diagframework.systemevidence.summary.v4.1'
         ModuleId=$ModuleId
         ModuleVersion=$ModuleVersion
         Status=$Status
@@ -1545,8 +2139,14 @@ function New-SummaryObject {
         ErrorCount=@($split.Errors).Count
         WarningCount=@($split.Warnings).Count
         WarningsByCode=$warningsByCode
-        Purpose='AI/szakértő által elemezhető Windows 11 P0 read-only evidence csomag storage topológia validációval, hint-vs-detected összevetéssel és top findings mezőkkel.'
+        Purpose='AI/szakértő által elemezhető Windows 11 P0 read-only evidence bridge P1 v1.4.0 normalizálókhoz: CbsPersist, minidump CDB/WinDbg, repair-source advisor, KB context handoff, servicing/WU signal summary.'
+        CompatibleP1Version=$P1NormalizerCompatibleVersion
+        P1NormalizerHandoffDefinition=(Get-P1NormalizerHandoffDefinition)
         P0Evidence=$P0Results
+        CbsPersistEvidence=$cbsPersistSummary
+        MiniDumpWinDbg=$miniDumpSummary
+        RepairSourceAdvisor=$repairSourceAdvisor
+        KBContextHandoff=$kbContextHandoff
         TopFindings=$topFindings
         RiskIndicators=$riskIndicators
         SuggestedNextEvidence=$suggestedNextEvidence
@@ -1567,7 +2167,7 @@ function Invoke-EvidenceCollection {
     $issues=@(); $eventSummary=@(); $copied=@(); $nativeResults=@(); $p0Results=@()
     Add-ProgressEvent $packageRoot 'Start' 'OK' "DaysBack=$DaysBack MaxEvents=$MaxEvents TargetKB=$TargetKB WhatIf=$($WhatIf.IsPresent)"
     if ($WhatIf) {
-        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v3.4'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256','Storage controller correlation','Disk 153 timeline','User hint vs detected topology validation','RAID volume map','Physical disk candidate map','Target KB correlation','TopFindings/RiskIndicators/SuggestedNextEvidence') }
+        $summary=[PSCustomObject]@{ SchemaVersion='diagframework.systemevidence.summary.v4.1'; ModuleId=$ModuleId; ModuleVersion=$ModuleVersion; WhatIf=$true; Status='WhatIf'; PlannedPackageRoot=$packageRoot; PlannedZipPath=$zipPath; P0Planned=@('EVTX export','WindowsUpdate generated log','DISM ScanHealth','SFC verifyonly','Storage mapping','WER aggregation','copied_logs skipped-files manifest','Manifest SHA256','Storage controller correlation','Disk 153 timeline','User hint vs detected topology validation','RAID volume map','Physical disk candidate map','Target KB correlation','TopFindings/RiskIndicators/SuggestedNextEvidence','Baunok evidence-gap summary','Servicing risk summary','WindowsUpdate signal summary','P1 normalizer handoff readiness') }
         Write-JsonSafe -InputObject $summary -Path (Join-Path $packageRoot 'ai_summary.json') -Depth 8
         return $summary
     }
@@ -1577,11 +2177,21 @@ function Invoke-EvidenceCollection {
     try { Write-JsonSafe -InputObject @(Get-DriverSnapshot) -Path (Join-Path $packageRoot 'drivers/pnp-signed-drivers.json') -Depth 8; Add-ProgressEvent $packageRoot 'DriverSnapshot' } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Error' -Code 'DriverSnapshotFailed' -Step 'DriverSnapshot' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'DriverSnapshot' 'Error' $_.Exception.Message }
     try { $eventResult=Collect-Events -PackageRoot $packageRoot -StartTime $startTime -Issues $issues -MaxEvents $MaxEvents; $eventSummary=@($eventResult.Summary); $issues=@($eventResult.Issues); $p0Results += [PSCustomObject]@{ Area='Events'; Result='Collected'; Count=@($eventSummary).Count }; Add-ProgressEvent $packageRoot 'EventLogs' 'OK' "Logs=$($eventSummary.Count)" } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Error' -Code 'EventCollectionFailed' -Step 'EventLogs' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'EventLogs' 'Error' $_.Exception.Message }
     try { $copyResult=Copy-BaselineLogs $packageRoot; $copied=@($copyResult.Copied) + @($copyResult.VendorRecords); $p0Results += [PSCustomObject]@{ Area='CopiedLogs'; CopiedCount=@($copyResult.Copied).Count; SkippedCount=@($copyResult.Skipped).Count; Policy='SystemLogCopyPolicy + SetupLogCopyPolicy + VendorLogPolicy' }; Add-ProgressEvent $packageRoot 'CopyLogs' 'OK' "Copied=$(@($copyResult.Copied).Count) Skipped=$(@($copyResult.Skipped).Count) VendorRecords=$(@($copyResult.VendorRecords).Count)" } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Error' -Code 'CopyLogsFailed' -Step 'CopyLogs' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'CopyLogs' 'Error' $_.Exception.Message }
+    try { $cbsPersist=Collect-CbsPersistEvidence -PackageRoot $packageRoot; $p0Results += [PSCustomObject]@{ Area='CbsPersistEvidence'; Result=$cbsPersist }; Add-ProgressEvent $packageRoot 'CbsPersistEvidence' 'OK' ("CBS=" + [string]$cbsPersist.CbsLogCount + " DISM=" + [string]$cbsPersist.DismLogCount + " CAB=" + [string]$cbsPersist.CbsPersistCabCount) } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'CbsPersistEvidenceFailed' -Step 'CbsPersistEvidence' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'CbsPersistEvidence' 'Warning' $_.Exception.Message }
     try { $wu=Invoke-WindowsUpdateLogConversion -PackageRoot $packageRoot; $p0Results += [PSCustomObject]@{ Area='WindowsUpdateLog'; Status=$wu.Status; Length=$wu.Length }; Add-ProgressEvent $packageRoot 'WindowsUpdateLog' $wu.Status "Length=$($wu.Length)" } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'WindowsUpdateLogConversionFailed' -Step 'WindowsUpdateLog' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'WindowsUpdateLog' 'Warning' $_.Exception.Message }
     try { $defs=Get-NativeCommandDefinitions; Write-NativeCommandReadme -PackageRoot $packageRoot -Definitions $defs; foreach($d in $defs | Where-Object { $_.SubDirectory -eq 'commands' }) { $nativeResults += Invoke-NativeCommandSafe -PackageRoot $packageRoot -SubDirectory $d.SubDirectory -Name $d.Name -File $d.File -ArgumentList ([string[]]$d.ArgumentList) }; Write-JsonSafe -InputObject $nativeResults -Path (Join-Path $packageRoot 'commands/native-command-results.json') -Depth 12; Add-ProgressEvent $packageRoot 'NativeCommands' 'OK' "Commands=$($nativeResults.Count)" } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Error' -Code 'NativeCommandsFailed' -Step 'NativeCommands' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'NativeCommands' 'Error' $_.Exception.Message }
     try { $serv=Collect-ServicingEvidence -PackageRoot $packageRoot; $p0Results += [PSCustomObject]@{ Area='Servicing'; CommandCount=@($serv).Count }; Add-ProgressEvent $packageRoot 'ServicingEvidence' 'OK' "Commands=$(@($serv).Count)" } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'ServicingEvidenceFailed' -Step 'ServicingEvidence' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'ServicingEvidence' 'Warning' $_.Exception.Message }
     try { $storage=Collect-StorageEvidence -PackageRoot $packageRoot -StartTime $startTime -TargetKB $TargetKB; $p0Results += [PSCustomObject]@{ Area='Storage'; Result=$storage }; Add-ProgressEvent $packageRoot 'StorageEvidence' 'OK' "Disk153=$($storage.Disk153Count)" } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'StorageEvidenceFailed' -Step 'StorageEvidence' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'StorageEvidence' 'Warning' $_.Exception.Message }
+    $wer = $null
     try { $wer=Collect-WerSummary -PackageRoot $packageRoot; $p0Results += [PSCustomObject]@{ Area='WER'; ReportCount=$wer.ReportCount }; Add-ProgressEvent $packageRoot 'WerSummary' 'OK' "Reports=$($wer.ReportCount)" } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'WerSummaryFailed' -Step 'WerSummary' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'WerSummary' 'Warning' $_.Exception.Message }
+    try { $miniDump=Invoke-MiniDumpCdbAnalysis -PackageRoot $packageRoot; $p0Results += [PSCustomObject]@{ Area='MiniDumpWinDbg'; Result=$miniDump }; $miniStatus = if($miniDump){[string]$miniDump.Status}else{'Unknown'}; Add-ProgressEvent $packageRoot 'MiniDumpWinDbg' 'OK' ("Status=" + $miniStatus) } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'MiniDumpWinDbgFailed' -Step 'MiniDumpWinDbg' -Target '' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace; Add-ProgressEvent $packageRoot 'MiniDumpWinDbg' 'Warning' $_.Exception.Message }
+    $servicingRisk = $null
+    try { $servicingRisk = New-ServicingRiskSummary -PackageRoot $packageRoot; Write-JsonSafe -InputObject $servicingRisk -Path (Join-Path $packageRoot 'servicing/servicing-risk-summary.json') -Depth 12; $p0Results += [PSCustomObject]@{ Area='ServicingRisk'; Result=$servicingRisk }; Add-ProgressEvent $packageRoot 'ServicingRiskSummary' 'OK' $servicingRisk.Status } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'ServicingRiskSummaryFailed' -Step 'ServicingRiskSummary' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace }
+    $wuSignal = $null
+    try { $wuSignal = New-WindowsUpdateSignalSummary -PackageRoot $packageRoot -TargetKB $TargetKB; Write-JsonSafe -InputObject $wuSignal -Path (Join-Path $packageRoot 'windows_update/windowsupdate-signal-summary.json') -Depth 12; $p0Results += [PSCustomObject]@{ Area='WindowsUpdateSignal'; Result=$wuSignal }; Add-ProgressEvent $packageRoot 'WindowsUpdateSignalSummary' 'OK' ("ErrorCodes=" + @($wuSignal.TopErrorCodes).Count) } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'WindowsUpdateSignalSummaryFailed' -Step 'WindowsUpdateSignalSummary' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace }
+    try { $repairAdvisor = New-RepairSourceAdvisor -PackageRoot $packageRoot -ServicingRisk $servicingRisk -WindowsUpdateSignal $wuSignal; $p0Results += [PSCustomObject]@{ Area='RepairSourceAdvisor'; Result=$repairAdvisor }; Add-ProgressEvent $packageRoot 'RepairSourceAdvisor' 'OK' ([string]$repairAdvisor.Status) } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'RepairSourceAdvisorFailed' -Step 'RepairSourceAdvisor' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace }
+    try { $kbHandoff = New-KBContextHandoff -PackageRoot $packageRoot -TargetKB $TargetKB; $p0Results += [PSCustomObject]@{ Area='KBContextHandoff'; Result=$kbHandoff }; Add-ProgressEvent $packageRoot 'KBContextHandoff' 'OK' ([string]$kbHandoff.Assessment) } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'KBContextHandoffFailed' -Step 'KBContextHandoff' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace }
+    try { $gapSummary = New-P0EvidenceGapSummary -PackageRoot $packageRoot -TargetKB $TargetKB -Issues $issues -EventSummary $eventSummary -P0Results $p0Results -ServicingRisk $servicingRisk -WindowsUpdateSignal $wuSignal -WerSummary $wer; Write-JsonSafe -InputObject $gapSummary -Path (Join-Path $packageRoot 'analysis/evidence-gap-summary.json') -Depth 12; Write-JsonSafe -InputObject $gapSummary -Path (Join-Path $packageRoot 'analysis/baunok-evidence-gap-backport.json') -Depth 12; $p0Results += [PSCustomObject]@{ Area='P0EvidenceGaps'; Result=$gapSummary }; Add-ProgressEvent $packageRoot 'EvidenceGapSummary' 'OK' ("Gaps=" + $gapSummary.GapCount) } catch { $issues=Add-CollectorIssue -CurrentIssues $issues -Severity 'Warning' -Code 'EvidenceGapSummaryFailed' -Step 'EvidenceGapSummary' -Category $_.CategoryInfo.ToString() -Message $_.Exception.Message -ScriptStackTrace $_.ScriptStackTrace }
     Write-CollectorIssuesSafe -PackageRoot $packageRoot -Issues $issues
     $split = Split-IssuesBySeverity -Issues $issues
     $status = if (@($split.Errors).Count -gt 0) { 'Partial' } elseif (@($split.Warnings).Count -gt 0) { 'OKWithWarnings' } else { 'OK' }
@@ -1600,8 +2210,8 @@ switch ($Action) {
             IssueDetected=$true
             FixAvailable=$true
             Severity='Info'
-            Summary='Rendszerszintű P0 evidence csomag készíthető EVTX, Windows Update, servicing, storage, WER és lokalizált disk 153 normalizálással.'
-            RecommendedAction='Javasolt lépések: 1) Állítsd be a DaysBack értéket. 2) Indítsd el a rendszer LOG csomagot WhatIf nélkül. 3) Először ai_summary.json, collector-issues.json és event-export-metadata.json fájlokat nézd. 4) Storage hibánál disk-event-map.json és disk-event-153-aggregate.json a kulcs. 5) WER zajnál wer-summary.json és wer-reports.json. 6) Javítómodult csak pre-repair evidence után futtass.'
+            Summary='Rendszerszintű P0 evidence bridge csomag készíthető EVTX, Windows Update, servicing, CbsPersist, minidump CDB/WinDbg, storage, WER és P1 v1.4.0 normalizer átadási pontokkal.'
+            RecommendedAction='Javasolt lépések: 1) Állítsd be a DaysBack értéket. 2) Indítsd el a rendszer LOG csomagot WhatIf nélkül. 3) Először ai_summary.json, collector-issues.json és event-export-metadata.json fájlokat nézd. 4) Storage hibánál disk-event-map.json és disk-event-153-aggregate.json a kulcs. 5) WER zajnál wer-summary.json és wer-reports.json. 6) Minidump esetén nézd meg az analysis/windbg/normalized/minidump-summary.json fájlt. 7) Repair-source jelzésnél ne WU-reset legyen az első javítási javaslat. 8) Javítómodult csak pre-repair evidence után futtass.'
         }
     }
     'Invoke-Fix' { Invoke-EvidenceCollection -DaysBack $DaysBack -MaxEvents $MaxEvents -WhatIf:$WhatIf -TargetKB $TargetKB }
